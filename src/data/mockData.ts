@@ -1,4 +1,4 @@
-import { Cartilla, School } from '../types/index.ts';
+import type { Cartilla, School } from '../types/index.ts';
 import { CURRENT_TERM, formatDeliveryWindow } from '../lib/format.ts';
 
 /**
