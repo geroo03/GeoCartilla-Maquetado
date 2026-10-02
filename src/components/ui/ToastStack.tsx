@@ -22,7 +22,7 @@ export const ToastStack: React.FC = () => {
 
   return (
     <div
-      className="fixed bottom-20 right-4 sm:right-6 z-[60] flex flex-col gap-2 items-end no-print"
+      className="fixed bottom-[calc(var(--fab-bottom)_+_3.5rem)] right-4 sm:right-6 z-[60] flex flex-col gap-2 items-end no-print"
       role="status"
       aria-live="polite"
     >

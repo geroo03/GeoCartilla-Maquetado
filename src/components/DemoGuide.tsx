@@ -61,14 +61,13 @@ interface DemoGuideProps {
   onSwitchMode: (mode: AppMode) => void;
   onGoToTab: (tab: TeacherTab) => void;
   /** El portal del alumno tiene barra inferior: el botón va por encima. */
-  raised?: boolean;
 }
 
 /**
  * Panel de ayuda de la demo: el recorrido sugerido, el reinicio a los datos
  * originales y el estado de la persistencia.
  */
-export const DemoGuide: React.FC<DemoGuideProps> = ({ mode, onSwitchMode, onGoToTab, raised = false }) => {
+export const DemoGuide: React.FC<DemoGuideProps> = ({ mode, onSwitchMode, onGoToTab }) => {
   const { state, resetDemo } = useDemo();
   const [isOpen, setIsOpen] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
@@ -77,7 +76,7 @@ export const DemoGuide: React.FC<DemoGuideProps> = ({ mode, onSwitchMode, onGoTo
     <>
       <button
         onClick={() => setIsOpen((open) => !open)}
-        className={`fixed ${raised ? 'bottom-20 sm:bottom-4' : 'bottom-4'} right-4 z-50 w-11 h-11 rounded-full bg-secondary text-on-secondary shadow-2xl flex items-center justify-center hover:bg-on-secondary-container transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-secondary no-print`}
+        className={`fixed bottom-(--fab-bottom) right-4 z-50 w-11 h-11 rounded-full bg-secondary text-on-secondary shadow-2xl flex items-center justify-center hover:bg-on-secondary-container transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-secondary no-print`}
         type="button"
         aria-label="Guía de la demo"
         aria-expanded={isOpen}
@@ -86,7 +85,7 @@ export const DemoGuide: React.FC<DemoGuideProps> = ({ mode, onSwitchMode, onGoTo
       </button>
 
       {isOpen && (
-        <div className={`fixed ${raised ? 'bottom-36 sm:bottom-20' : 'bottom-20'} right-4 z-50 w-[22rem] max-w-[calc(100vw-2rem)] max-h-[70vh] bg-surface-container-lowest rounded-2xl shadow-2xl border border-surface-container-high flex flex-col overflow-hidden no-print`}>
+        <div className={`fixed bottom-[calc(var(--fab-bottom)_+_3.5rem)] right-4 z-50 w-[22rem] max-w-[calc(100vw-2rem)] max-h-[70vh] bg-surface-container-lowest rounded-2xl shadow-2xl border border-surface-container-high flex flex-col overflow-hidden no-print`}>
           <div className="px-4 py-3 border-b border-surface-container-low bg-primary text-on-primary">
             <h2 className="text-sm font-bold flex items-center gap-2">
               <Icon name="map" size={18} className="text-secondary-fixed-dim" />

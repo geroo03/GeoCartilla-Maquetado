@@ -43,16 +43,13 @@ export function useShell(): ShellActions {
 function ViewSwitcher({
   mode,
   onChange,
-  raised,
 }: {
   mode: AppMode;
   onChange: (mode: AppMode) => void;
-  /** El portal del alumno tiene barra inferior: los flotantes van por encima. */
-  raised: boolean;
 }) {
   return (
     <div
-      className={`fixed ${raised ? 'bottom-20 sm:bottom-4' : 'bottom-4'} left-1/2 -translate-x-1/2 z-50 bg-primary-container/95 text-white backdrop-blur-md px-3 py-1.5 rounded-full shadow-2xl border border-primary-fixed/30 flex items-center gap-2 text-xs no-print`}
+      className={`fixed bottom-(--fab-bottom) left-1/2 -translate-x-1/2 z-50 bg-primary-container/95 text-white backdrop-blur-md px-3 py-1.5 rounded-full shadow-2xl border border-primary-fixed/30 flex items-center gap-2 text-xs no-print`}
     >
       <span className="text-[11px] font-semibold text-on-primary-container px-2 hidden sm:inline">
         Vista actual:
@@ -134,7 +131,14 @@ function AppShell() {
 
   return (
     <ShellContext.Provider value={actions}>
-      <div className="min-h-screen bg-background font-sans text-on-surface antialiased">
+      <div
+        className="min-h-screen bg-background font-sans text-on-surface antialiased"
+        // Línea de base de los controles flotantes (switcher, guía, toasts).
+        // El portal del alumno tiene una barra inferior fija de 60px que, por
+        // ser fixed, está pegada al borde de la ventana en TODOS los anchos:
+        // no alcanza con subir los flotantes sólo en pantallas chicas.
+        style={{ '--fab-bottom': appMode === 'student' ? '5rem' : '1rem' } as React.CSSProperties}
+      >
         <ToastStack />
 
         {persistenceBlocked && (
@@ -146,14 +150,13 @@ function AppShell() {
         )}
 
         {!showTeacherLogin && (
-          <ViewSwitcher mode={appMode} onChange={setAppMode} raised={appMode === 'student'} />
+          <ViewSwitcher mode={appMode} onChange={setAppMode} />
         )}
         {!showTeacherLogin && (
           <DemoGuide
             mode={appMode}
             onSwitchMode={setAppMode}
             onGoToTab={setTeacherTab}
-            raised={appMode === 'student'}
           />
         )}
 
