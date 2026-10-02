@@ -1,135 +1,110 @@
 import React from 'react';
-import { Order } from '../types/index.ts';
+import type { Order } from '../types/index.ts';
+import { useDemo } from '../store/demoStore.tsx';
+import { formatARS } from '../lib/format.ts';
+import { Icon } from './ui/Icon.tsx';
+import { ModalShell } from './ui/ModalShell.tsx';
+import { BookletCover } from './ui/CoverArt.tsx';
 
 interface ConfirmDeliveryModalProps {
   order: Order | null;
   isOpen: boolean;
   onClose: () => void;
-  onConfirm: (orderId: string) => void;
 }
 
+/** Último paso antes de dar la cartilla en mano. */
 export const ConfirmDeliveryModal: React.FC<ConfirmDeliveryModalProps> = ({
   order,
   isOpen,
   onClose,
-  onConfirm,
 }) => {
-  if (!isOpen || !order) return null;
+  const { state, dispatchUndoable } = useDemo();
+
+  if (!order) return null;
+
+  const cartilla = state.cartillas.find((c) => c.id === order.cartillaId);
+  const needsPayment = order.paymentStatus === 'Pendiente de pago';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-on-background/40 backdrop-blur-xs animate-in fade-in duration-200">
-      <div className="w-full max-w-lg bg-surface-container-lowest rounded-2xl shadow-2xl overflow-hidden border border-surface-container-high/60">
-        {/* Modal Header */}
-        <div className="px-6 pt-6 pb-3 flex items-center justify-between border-b border-surface-container-low">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-secondary-container text-secondary flex items-center justify-center shrink-0">
-              <span className="material-symbols-outlined text-[24px]">assignment_turned_in</span>
-            </div>
-            <div>
-              <h3 className="text-lg font-bold text-primary leading-tight">
-                Confirmar entrega de cartilla
-              </h3>
-              <span className="text-xs text-outline font-medium">
-                Protocolo de entrega institucional
-              </span>
-            </div>
-          </div>
+    <ModalShell
+      isOpen={isOpen}
+      onClose={onClose}
+      title="Confirmar entrega"
+      subtitle={`${order.code} · ${order.pickupLocation}`}
+      icon="inventory_2"
+      size="sm"
+      footer={
+        <div className="flex items-center justify-end gap-2">
           <button
-            className="w-8 h-8 rounded-full flex items-center justify-center text-outline hover:bg-surface-container hover:text-on-surface transition-colors cursor-pointer"
             onClick={onClose}
+            className="px-4 py-2 rounded-lg bg-surface-container text-on-surface-variant text-xs font-semibold hover:bg-surface-container-high focus-visible:outline-2 focus-visible:outline-primary"
             type="button"
           >
-            <span className="material-symbols-outlined text-[20px]">close</span>
-          </button>
-        </div>
-
-        {/* Modal Body */}
-        <div className="px-6 py-5 flex flex-col gap-4 bg-surface">
-          {/* Voucher / Token Visual Card */}
-          <div className="bg-surface-container-low rounded-xl p-4 flex flex-col gap-3 border border-surface-container-high/60">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-outline uppercase tracking-wider">
-                Código de Retiro
-              </span>
-              <span className="text-2xl font-extrabold text-primary font-mono tracking-wider">
-                {order.code}
-              </span>
-            </div>
-
-            <div className="h-px bg-surface-container-high w-full my-1" />
-
-            <div className="grid grid-cols-2 gap-3 text-xs">
-              <div>
-                <span className="text-outline block mb-0.5">Alumno</span>
-                <span className="text-sm font-bold text-on-surface block truncate">
-                  {order.studentName}
-                </span>
-                <span className="text-outline">DNI: {order.studentDni}</span>
-              </div>
-              <div>
-                <span className="text-outline block mb-0.5">Institución</span>
-                <span className="text-sm font-semibold text-on-surface block truncate">
-                  {order.school}
-                </span>
-                <span className="text-secondary font-bold">{order.year}</span>
-              </div>
-            </div>
-
-            <div className="bg-surface-container-lowest p-3 rounded-lg flex items-center gap-3 border border-surface-container-high/40">
-              <span className="material-symbols-outlined text-primary text-[22px]">menu_book</span>
-              <div className="flex flex-col min-w-0">
-                <span className="text-[11px] text-outline uppercase tracking-wider">
-                  Material a entregar
-                </span>
-                <span className="text-xs font-bold text-primary truncate">
-                  {order.cartillaTitle} (Ed. 2025)
-                </span>
-              </div>
-            </div>
-
-            {order.paymentStatus === 'Pendiente de pago' && (
-              <div className="p-2.5 bg-tertiary-fixed text-on-tertiary-fixed rounded-lg text-xs flex items-center justify-between">
-                <span className="font-semibold">Cobro pendiente en efectivo:</span>
-                <span className="font-bold text-sm">$ {order.price.toLocaleString('es-AR')} ARS</span>
-              </div>
-            )}
-          </div>
-
-          {/* Verification Notice */}
-          <div className="flex items-start gap-3 p-3.5 bg-secondary-container/40 border border-secondary/20 rounded-xl text-on-secondary-container">
-            <span className="material-symbols-outlined text-[20px] text-secondary mt-0.5 shrink-0">
-              verified_user
-            </span>
-            <p className="text-xs text-secondary leading-relaxed">
-              <strong>Verificación obligatoria:</strong> Comprobá que el alumno o adulto responsable
-              exhiba este código desde su celular o acredite identidad con DNI antes de retirar en la{' '}
-              <em>Mesa de Geografía - Sala de Profesores</em>.
-            </p>
-          </div>
-        </div>
-
-        {/* Modal Footer */}
-        <div className="px-6 py-4 flex items-center justify-end gap-3 bg-surface-container-lowest border-t border-surface-container-low">
-          <button
-            className="px-4 py-2.5 rounded-lg text-on-surface-variant font-semibold text-xs hover:bg-surface-container transition-colors cursor-pointer"
-            onClick={onClose}
-            type="button"
-          >
-            Cancelar
+            Volver
           </button>
           <button
-            className="px-5 py-2.5 rounded-lg bg-secondary text-on-secondary font-bold text-xs hover:bg-secondary/90 transition-all shadow-md inline-flex items-center gap-2 cursor-pointer active:scale-95"
             onClick={() => {
-              onConfirm(order.id);
+              dispatchUndoable(
+                { type: 'DELIVER', orderId: order.id },
+                needsPayment
+                  ? `Cartilla entregada y ${formatARS(order.price)} cobrados a ${order.studentName}.`
+                  : `Cartilla entregada a ${order.studentName}.`,
+              );
               onClose();
             }}
+            className="px-4 py-2 rounded-lg bg-secondary text-on-secondary text-xs font-bold shadow-sm hover:bg-on-secondary-container flex items-center gap-1.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-secondary"
             type="button"
           >
-            <span className="material-symbols-outlined text-[18px]">check_circle</span>
-            <span>Confirmar y marcar entregado</span>
+            <Icon name="check" size={16} />
+            {needsPayment ? 'Cobrar y entregar' : 'Confirmar entrega'}
           </button>
         </div>
+      }
+    >
+      <div className="px-6 py-5 flex flex-col gap-4">
+        <div className="flex gap-3.5">
+          <BookletCover
+            coverUrl={order.cartillaCover}
+            motif={cartilla?.coverMotif ?? 'topographic'}
+            seed={order.cartillaId}
+            label={order.year.replace(' Año', '')}
+            className="w-16 h-22 rounded-lg shrink-0 shadow-md"
+          />
+          <div className="min-w-0">
+            <h3 className="text-sm font-bold text-on-surface leading-snug">{order.cartillaTitle}</h3>
+            <p className="text-[11px] text-outline mt-0.5">{order.cartillaPages} páginas</p>
+            <p className="text-xs font-bold text-on-surface mt-2">{order.studentName}</p>
+            <p className="text-[11px] text-outline font-mono">DNI {order.studentDni}</p>
+            <p className="text-[11px] text-outline">{order.division}</p>
+          </div>
+        </div>
+
+        <div className="bg-surface-container-low rounded-xl p-3 flex items-start gap-2.5">
+          <Icon name="badge" size={18} className="text-primary shrink-0 mt-0.5" />
+          <p className="text-[11px] text-on-surface-variant leading-relaxed">
+            Verificá el DNI <strong className="font-mono text-on-surface">{order.studentDni}</strong> o el
+            comprobante digital antes de entregar el ejemplar.
+          </p>
+        </div>
+
+        {needsPayment ? (
+          <div className="bg-tertiary-fixed rounded-xl p-3 flex items-start gap-2.5">
+            <Icon name="payments" size={18} className="text-on-tertiary-fixed-variant shrink-0 mt-0.5" />
+            <p className="text-[11px] text-on-tertiary-fixed leading-relaxed">
+              Este pedido eligió <strong>{order.paymentMethod}</strong>. Al confirmar se registran{' '}
+              <strong>{formatARS(order.price)}</strong> cobrados en el acto.
+            </p>
+          </div>
+        ) : (
+          <div className="bg-secondary-container rounded-xl p-3 flex items-start gap-2.5">
+            <Icon name="check_circle" size={18} className="text-on-secondary-container shrink-0 mt-0.5" />
+            <p className="text-[11px] text-on-secondary-container leading-relaxed">
+              El pago de <strong>{formatARS(order.price)}</strong> ya está acreditado vía{' '}
+              {order.paymentMethod}. Sólo resta entregar el ejemplar.
+            </p>
+          </div>
+        )}
       </div>
-    </div>
+    </ModalShell>
   );
 };

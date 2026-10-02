@@ -77,7 +77,7 @@ export const HorizontalBars: React.FC<HorizontalBarsProps> = ({
                 fill="#43474e"
                 fontWeight="600"
               >
-                {datum.label.length > 22 ? `${datum.label.slice(0, 21)}...` : datum.label}
+                {datum.label.length > 26 ? `${datum.label.slice(0, 25)}...` : datum.label}
               </text>
 
               {/* Carril: paso más claro de la misma rampa */}

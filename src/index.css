@@ -105,14 +105,53 @@ body {
   right: -9px;
 }
 
+/* Foco visible y consistente en todos los controles */
+:where(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/*
+ * Impresion: el maquetado original llamaba a window.print() pero no marcaba
+ * nada, asi que salia toda la app (sidebar, header y toasts incluidos).
+ * Ahora se oculta todo y solo se revela el contenedor .print-root, usando
+ * visibility para no romper la cadena de ancestros, mas position absolute
+ * para que arranque al tope de la hoja.
+ */
 @media print {
   body {
     background: white !important;
   }
+
+  body * {
+    visibility: hidden;
+    box-shadow: none !important;
+  }
+
+  .print-root,
+  .print-root * {
+    visibility: visible;
+  }
+
+  .print-root {
+    position: absolute !important;
+    left: 0;
+    top: 0;
+    width: 100%;
+    max-height: none !important;
+    overflow: visible !important;
+    border: 0 !important;
+  }
+
   .no-print {
     display: none !important;
   }
+
   .print-only {
     display: block !important;
+  }
+
+  @page {
+    margin: 14mm;
   }
 }

@@ -94,3 +94,16 @@ export function initials(name: string): string {
     .map((part) => part.charAt(0).toUpperCase())
     .join('');
 }
+
+/**
+ * Nombre corto de un colegio para tablas y ejes de gráficos. Los nombres
+ * completos ("Esc. Normal N°1 Presidente Roque Sáenz Peña") rompen la grilla
+ * de la tabla de pedidos.
+ */
+export function shortSchoolName(name: string, max = 22): string {
+  const trimmed = name
+    .replace(/^(Col\.|Colegio|Inst\.|Instituto|Esc\.|Escuela)\s+/i, '')
+    .replace(/\s+Gral\.\s+/i, ' ')
+    .trim();
+  return trimmed.length > max ? `${trimmed.slice(0, max - 1).trimEnd()}...` : trimmed;
+}

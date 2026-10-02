@@ -5,7 +5,9 @@
  *
  * El par categórico #2563eb / #c2660a pasa los seis, contraste incluido, y el
  * azul es el mismo que ya usa el logo de la app. La rampa del embudo es de un
- * solo tono con luminosidad monótona decreciente (0.924 -> 0.546).
+ * solo tono con luminosidad monótona decreciente. El extremo claro arranca
+ * en #93b4f0 y no mas claro: por debajo de eso la barra se confunde con su
+ * propio carril, que es un gris azulado muy tenue.
  */
 
 export const SERIES = {
@@ -16,7 +18,7 @@ export const SERIES = {
 };
 
 /** Rampa secuencial de un tono para el embudo: claro = inicio, oscuro = final. */
-export const FUNNEL_RAMP = ['#dbe6fd', '#a9c2f4', '#5d8ae6', '#2563eb'];
+export const FUNNEL_RAMP = ['#93b4f0', '#6d97e9', '#4a7ae4', '#2563eb'];
 
 /** Un solo acento para los gráficos de una sola serie. */
 export const ACCENT = '#2563eb';

@@ -1,176 +1,336 @@
-import React, { useState } from 'react';
-import { Cartilla, Order, PaymentMethod, PaymentStatus, DeliveryStatus } from '../types/index.ts';
+import React, { useMemo, useState } from 'react';
+import type { Cartilla, DeliveryStatus, Order, PaymentMethod, PaymentStatus } from '../types/index.ts';
+import { useDemo } from '../store/demoStore.tsx';
+import { PICKUP_LOCATION } from '../data/mockData.ts';
+import { formatARS, formatDateTimeShort } from '../lib/format.ts';
+import { Icon } from './ui/Icon.tsx';
+import { ModalShell } from './ui/ModalShell.tsx';
+import { BookletCover } from './ui/CoverArt.tsx';
 
 interface ManualOrderModalProps {
   isOpen: boolean;
   onClose: () => void;
-  cartillas: Cartilla[];
-  onAddOrder: (newOrder: Order) => void;
 }
 
-export const ManualOrderModal: React.FC<ManualOrderModalProps> = ({
-  isOpen,
-  onClose,
-  cartillas,
-  onAddOrder,
-}) => {
+const inputClass =
+  'w-full h-10 px-3 rounded-lg bg-surface-container-low border border-outline-variant/30 text-xs text-on-surface placeholder:text-outline focus:outline-none focus:ring-2 focus:ring-primary';
+
+/** Carga de un pedido tomado en mano, en la sala de profesores. */
+export const ManualOrderModal: React.FC<ManualOrderModalProps> = ({ isOpen, onClose }) => {
+  const { state, dispatch, showToast } = useDemo();
+
+  // Sólo se puede cargar un pedido de una cartilla activa y con stock.
+  const available = useMemo(
+    () => state.cartillas.filter((c) => c.isActive && c.stock > 0),
+    [state.cartillas],
+  );
+
   const [studentName, setStudentName] = useState('');
   const [studentDni, setStudentDni] = useState('');
+  const [studentEmail, setStudentEmail] = useState('');
   const [studentPhone, setStudentPhone] = useState('+54 9 11 ');
-  const [selectedCartillaId, setSelectedCartillaId] = useState(cartillas[0]?.id || '');
+  const [cartillaId, setCartillaId] = useState('');
+  const [division, setDivision] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('Efectivo retiro');
   const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>('Pendiente de pago');
+  const [errors, setErrors] = useState<Record<string, string>>({});
 
-  if (!isOpen) return null;
+  const selected: Cartilla | undefined =
+    available.find((c) => c.id === cartillaId) ?? available[0];
+  const school = state.schools.find((s) => s.code === selected?.schoolCode);
 
-  const selectedCartilla = cartillas.find((c) => c.id === selectedCartillaId) || cartillas[0];
+  const reset = () => {
+    setStudentName('');
+    setStudentDni('');
+    setStudentEmail('');
+    setStudentPhone('+54 9 11 ');
+    setCartillaId('');
+    setDivision('');
+    setPaymentMethod('Efectivo retiro');
+    setPaymentStatus('Pendiente de pago');
+    setErrors({});
+  };
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!studentName.trim() || !studentDni.trim()) return;
+  const handleSubmit = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!selected) return;
 
-    const randomNum = Math.floor(4830 + Math.random() * 50);
-    const now = new Date();
-    const formattedDate = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    const found: Record<string, string> = {};
+    if (studentName.trim().length < 3) found.name = 'Escribí el nombre y el apellido.';
+    const dniDigits = studentDni.replace(/\D/g, '');
+    if (dniDigits.length < 7 || dniDigits.length > 8) found.dni = 'El DNI tiene que tener 7 u 8 dígitos.';
+    if (state.orders.some((o) => o.studentDni.replace(/\D/g, '') === dniDigits && o.cartillaId === selected.id && o.deliveryStatus !== 'Cancelado')) {
+      found.dni = 'Ese DNI ya tiene un pedido de esta misma cartilla.';
+    }
+    if (studentEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(studentEmail)) {
+      found.email = 'Revisá el correo.';
+    }
 
-    const newOrder: Order = {
-      id: `geo-${randomNum}`,
-      code: `GEO-${randomNum}`,
+    if (Object.keys(found).length > 0) {
+      setErrors(found);
+      return;
+    }
+
+    const now = Date.now();
+    const code = `GEO-${4900 + state.orders.length + 1}`;
+    const deliveryStatus: DeliveryStatus =
+      paymentStatus === 'Pagado' ? 'Listo para retirar' : 'Preparado';
+
+    const order: Order = {
+      id: `${code.toLowerCase()}-${now.toString(36)}`,
+      code,
       studentName: studentName.trim(),
-      studentDni: studentDni.trim(),
-      studentEmail: `${studentName.toLowerCase().replace(/\s+/g, '.')}@colegio.edu.ar`,
-      studentPhone: studentPhone.trim() || '+54 9 11 5000-0000',
-      school: selectedCartilla?.school || 'Col. Nacional San Martín',
-      schoolCode: selectedCartilla?.schoolCode || 'san-martin',
-      year: selectedCartilla?.year || '3° Año',
-      division: `${selectedCartilla?.year || '3° Año'} (Div. A)`,
-      cartillaId: selectedCartilla?.id || 'cart-03',
-      cartillaTitle: selectedCartilla?.title || 'Geografía 3° Año',
-      cartillaCover: selectedCartilla?.coverUrl || '',
-      cartillaPages: selectedCartilla?.pages || 120,
+      studentDni: dniDigits.replace(/\B(?=(\d{3})+(?!\d))/g, '.'),
+      studentEmail: studentEmail.trim() || `${dniDigits}@sin-correo.local`,
+      studentPhone: studentPhone.trim(),
+      school: selected.school,
+      schoolCode: selected.schoolCode,
+      year: selected.year,
+      division: division || school?.divisions[0] || selected.divisions,
+      cartillaId: selected.id,
+      cartillaTitle: selected.title,
+      cartillaCover: selected.coverUrl,
+      cartillaPages: selected.pages,
       paymentMethod,
       paymentStatus,
-      deliveryStatus: (paymentStatus === 'Pagado' ? 'Listo para retirar' : 'Preparado') as DeliveryStatus,
-      date: formattedDate,
-      timestamp: Date.now(),
-      price: selectedCartilla?.price || 8000,
-      pickupLocation: 'Mesa de Geografía - Sala de Profesores',
+      deliveryStatus,
+      date: formatDateTimeShort(now),
+      timestamp: now,
+      price: selected.price,
+      pickupLocation: PICKUP_LOCATION,
+      history: [
+        {
+          at: now,
+          actor: 'docente',
+          label: 'Pedido cargado a mano',
+          detail: `Tomado en ${PICKUP_LOCATION} por el docente (${paymentMethod}).`,
+        },
+        ...(paymentStatus === 'Pagado'
+          ? [
+              {
+                at: now + 1,
+                actor: 'docente' as const,
+                label: 'Pago acreditado',
+                detail: `Cobro de ${formatARS(selected.price)} registrado al cargar el pedido.`,
+              },
+            ]
+          : []),
+      ],
     };
 
-    onAddOrder(newOrder);
+    dispatch({ type: 'ADD_ORDER', order, actor: 'docente' });
+    showToast(`Pedido ${code} cargado para ${order.studentName}.`);
+    reset();
     onClose();
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-on-background/40 backdrop-blur-xs animate-in fade-in duration-200">
-      <div className="w-full max-w-lg bg-surface-container-lowest rounded-2xl shadow-2xl overflow-hidden border border-surface-container-high/60">
-        <div className="px-6 pt-5 pb-3 flex items-center justify-between border-b border-surface-container-low">
-          <div className="flex items-center gap-2.5">
-            <span className="material-symbols-outlined text-[24px] text-primary">add_shopping_cart</span>
-            <h3 className="text-base font-bold text-primary">Cargar Pedido Manual</h3>
-          </div>
-          <button
-            onClick={onClose}
-            className="w-8 h-8 rounded-full flex items-center justify-center text-outline hover:bg-surface-container hover:text-on-surface cursor-pointer"
-            type="button"
-          >
-            <span className="material-symbols-outlined text-[20px]">close</span>
-          </button>
-        </div>
-
-        <form onSubmit={handleSubmit} className="p-6 flex flex-col gap-4 text-xs">
-          <div>
-            <label className="font-semibold text-on-surface block mb-1">Nombre y apellido del alumno *</label>
-            <input
-              required
-              className="w-full h-10 px-3 bg-surface-container-low border border-outline-variant/40 rounded-lg text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary"
-              placeholder="ej. Agustín Peralta"
-              type="text"
-              value={studentName}
-              onChange={(e) => setStudentName(e.target.value)}
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="font-semibold text-on-surface block mb-1">DNI del alumno *</label>
-              <input
-                required
-                className="w-full h-10 px-3 bg-surface-container-low border border-outline-variant/40 rounded-lg text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary"
-                placeholder="46.789.123"
-                type="text"
-                value={studentDni}
-                onChange={(e) => setStudentDni(e.target.value)}
-              />
-            </div>
-            <div>
-              <label className="font-semibold text-on-surface block mb-1">WhatsApp / Contacto</label>
-              <input
-                className="w-full h-10 px-3 bg-surface-container-low border border-outline-variant/40 rounded-lg text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary"
-                type="text"
-                value={studentPhone}
-                onChange={(e) => setStudentPhone(e.target.value)}
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="font-semibold text-on-surface block mb-1">Cartilla a encargar *</label>
-            <select
-              className="w-full h-10 px-3 bg-surface-container-low border border-outline-variant/40 rounded-lg text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary cursor-pointer"
-              value={selectedCartillaId}
-              onChange={(e) => setSelectedCartillaId(e.target.value)}
-            >
-              {cartillas.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.title} • {c.school} (${c.price.toLocaleString('es-AR')} ARS)
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="font-semibold text-on-surface block mb-1">Método de Cobro</label>
-              <select
-                className="w-full h-10 px-3 bg-surface-container-low border border-outline-variant/40 rounded-lg text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary cursor-pointer"
-                value={paymentMethod}
-                onChange={(e) => setPaymentMethod(e.target.value as PaymentMethod)}
-              >
-                <option value="Efectivo retiro">Efectivo al retirar</option>
-                <option value="Mercado Pago">Mercado Pago / Transferencia</option>
-              </select>
-            </div>
-            <div>
-              <label className="font-semibold text-on-surface block mb-1">Estado Inicial del Pago</label>
-              <select
-                className="w-full h-10 px-3 bg-surface-container-low border border-outline-variant/40 rounded-lg text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary cursor-pointer"
-                value={paymentStatus}
-                onChange={(e) => setPaymentStatus(e.target.value as PaymentStatus)}
-              >
-                <option value="Pendiente de pago">Pendiente de pago</option>
-                <option value="Pagado">Ya Pagado</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="pt-3 flex justify-end gap-2 border-t border-surface-container-low">
+    <ModalShell
+      isOpen={isOpen}
+      onClose={onClose}
+      title="Cargar pedido manual"
+      subtitle="Para los pedidos que llegan en mano, en la sala de profesores"
+      icon="edit_note"
+      size="lg"
+      footer={
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-[11px] text-outline">
+            {selected ? (
+              <>
+                Importe: <strong className="text-on-surface font-mono">{formatARS(selected.price)}</strong>
+              </>
+            ) : (
+              'No hay cartillas con stock disponible.'
+            )}
+          </span>
+          <div className="flex items-center gap-2">
             <button
               onClick={onClose}
+              className="px-4 py-2 rounded-lg bg-surface-container text-on-surface-variant text-xs font-semibold hover:bg-surface-container-high focus-visible:outline-2 focus-visible:outline-primary"
               type="button"
-              className="px-4 py-2 rounded-lg text-on-surface-variant font-semibold hover:bg-surface-container"
             >
               Cancelar
             </button>
             <button
+              form="manual-order-form"
+              disabled={!selected}
+              className="px-4 py-2 rounded-lg bg-primary text-on-primary text-xs font-bold shadow-sm hover:bg-primary-container flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
               type="submit"
-              className="px-5 py-2 rounded-lg bg-primary hover:bg-primary-container text-on-primary font-bold shadow-sm"
             >
-              Cargar Pedido
+              <Icon name="add" size={16} />
+              Registrar pedido
             </button>
           </div>
-        </form>
-      </div>
-    </div>
+        </div>
+      }
+    >
+      <form id="manual-order-form" onSubmit={handleSubmit} className="px-6 py-5 flex flex-col gap-4">
+        {available.length === 0 ? (
+          <p className="text-xs text-on-error-container bg-error-container rounded-lg px-3 py-2.5 flex items-center gap-2">
+            <Icon name="warning" size={18} />
+            Todas las cartillas están sin stock o desactivadas. Reponé stock antes de cargar un pedido.
+          </p>
+        ) : (
+          <>
+            <fieldset className="flex flex-col gap-3">
+              <legend className="text-[11px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">
+                Alumno
+              </legend>
+
+              <div className="grid sm:grid-cols-2 gap-3">
+                <label className="flex flex-col gap-1">
+                  <span className="text-xs font-semibold text-primary">Nombre y apellido</span>
+                  <input
+                    value={studentName}
+                    onChange={(event) => setStudentName(event.target.value)}
+                    placeholder="Camila Díaz"
+                    className={inputClass}
+                    aria-invalid={!!errors.name}
+                  />
+                  {errors.name && <span className="text-[10px] font-semibold text-error">{errors.name}</span>}
+                </label>
+
+                <label className="flex flex-col gap-1">
+                  <span className="text-xs font-semibold text-primary">DNI</span>
+                  <input
+                    value={studentDni}
+                    onChange={(event) => setStudentDni(event.target.value)}
+                    placeholder="47.901.344"
+                    inputMode="numeric"
+                    className={`${inputClass} font-mono`}
+                    aria-invalid={!!errors.dni}
+                  />
+                  {errors.dni && <span className="text-[10px] font-semibold text-error">{errors.dni}</span>}
+                </label>
+
+                <label className="flex flex-col gap-1">
+                  <span className="text-xs font-semibold text-primary">
+                    Email <span className="text-outline font-normal">(opcional)</span>
+                  </span>
+                  <input
+                    value={studentEmail}
+                    onChange={(event) => setStudentEmail(event.target.value)}
+                    placeholder="camila.diaz@gmail.com"
+                    type="email"
+                    className={inputClass}
+                    aria-invalid={!!errors.email}
+                  />
+                  {errors.email && (
+                    <span className="text-[10px] font-semibold text-error">{errors.email}</span>
+                  )}
+                </label>
+
+                <label className="flex flex-col gap-1">
+                  <span className="text-xs font-semibold text-primary">
+                    Teléfono <span className="text-outline font-normal">(opcional)</span>
+                  </span>
+                  <input
+                    value={studentPhone}
+                    onChange={(event) => setStudentPhone(event.target.value)}
+                    className={`${inputClass} font-mono`}
+                  />
+                </label>
+              </div>
+            </fieldset>
+
+            <fieldset className="flex flex-col gap-3">
+              <legend className="text-[11px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">
+                Cartilla
+              </legend>
+
+              <div className="flex gap-3">
+                {selected && (
+                  <BookletCover
+                    coverUrl={selected.coverUrl}
+                    motif={selected.coverMotif}
+                    seed={selected.id}
+                    label={selected.year.replace(' Año', '')}
+                    className="w-14 h-20 rounded-lg shrink-0 shadow-md"
+                  />
+                )}
+
+                <div className="flex-1 flex flex-col gap-3 min-w-0">
+                  <label className="flex flex-col gap-1">
+                    <span className="text-xs font-semibold text-primary">Cartilla solicitada</span>
+                    <select
+                      value={selected?.id ?? ''}
+                      onChange={(event) => setCartillaId(event.target.value)}
+                      className={`${inputClass} cursor-pointer`}
+                    >
+                      {available.map((cartilla) => (
+                        <option key={cartilla.id} value={cartilla.id}>
+                          {cartilla.code} · {cartilla.title} ({cartilla.stock} en stock)
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="flex flex-col gap-1">
+                    <span className="text-xs font-semibold text-primary">División</span>
+                    <select
+                      value={division}
+                      onChange={(event) => setDivision(event.target.value)}
+                      className={`${inputClass} cursor-pointer`}
+                    >
+                      <option value="">{school?.divisions[0] ?? selected?.divisions}</option>
+                      {school?.divisions.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              </div>
+
+              {selected && (
+                <p className="text-[11px] text-outline flex items-center gap-1.5">
+                  <Icon name="school" size={14} />
+                  {selected.school}
+                </p>
+              )}
+            </fieldset>
+
+            <fieldset className="flex flex-col gap-3">
+              <legend className="text-[11px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">
+                Cobro
+              </legend>
+
+              <div className="grid sm:grid-cols-2 gap-3">
+                <label className="flex flex-col gap-1">
+                  <span className="text-xs font-semibold text-primary">Método</span>
+                  <select
+                    value={paymentMethod}
+                    onChange={(event) => setPaymentMethod(event.target.value as PaymentMethod)}
+                    className={`${inputClass} cursor-pointer`}
+                  >
+                    <option value="Efectivo retiro">Efectivo retiro</option>
+                    <option value="Mercado Pago">Mercado Pago</option>
+                  </select>
+                </label>
+
+                <label className="flex flex-col gap-1">
+                  <span className="text-xs font-semibold text-primary">Estado</span>
+                  <select
+                    value={paymentStatus}
+                    onChange={(event) => setPaymentStatus(event.target.value as PaymentStatus)}
+                    className={`${inputClass} cursor-pointer`}
+                  >
+                    <option value="Pendiente de pago">Pendiente de pago</option>
+                    <option value="Pagado">Ya cobrado</option>
+                  </select>
+                </label>
+              </div>
+
+              <p className="text-[11px] text-on-surface-variant bg-surface-container-low rounded-lg px-3 py-2">
+                {paymentStatus === 'Pagado'
+                  ? 'El pedido queda listo para retirar y se descuenta un ejemplar del stock.'
+                  : 'El pedido queda preparado, con el cobro pendiente para el momento del retiro.'}
+              </p>
+            </fieldset>
+          </>
+        )}
+      </form>
+    </ModalShell>
   );
 };

@@ -1,400 +1,428 @@
-import React, { useState, useMemo } from 'react';
-import { Order } from '../types/index.ts';
+import React, { useEffect, useMemo, useState } from 'react';
+import type { Order } from '../types/index.ts';
+import { useDemo } from '../store/demoStore.tsx';
+import { useShell } from '../App.tsx';
+import { computeOrderMetrics, isLive, weekOverWeekDelta } from '../lib/metrics.ts';
+import { exportOrdersCsv } from '../lib/csv.ts';
+import { formatARS, formatNumber, shortSchoolName } from '../lib/format.ts';
+import { Icon } from './ui/Icon.tsx';
+import { KpiCard } from './ui/KpiCard.tsx';
+import { EmptyState } from './ui/EmptyState.tsx';
+import { SkeletonRows } from './ui/Skeleton.tsx';
+import { Pagination } from './ui/Pagination.tsx';
+import { BookletCover } from './ui/CoverArt.tsx';
+import { DeliveryChip, PaymentChip, PaymentMethodLabel } from './ui/StatusChip.tsx';
 
-interface OrdersViewProps {
-  orders: Order[];
-  onSelectOrder: (order: Order) => void;
-  onOpenConfirmDelivery: (order: Order) => void;
-  onOpenManualOrder: () => void;
-  onOpenPrintSheet: () => void;
-  onBulkDeliver: (ids: string[]) => void;
-  searchQuery: string;
+const PAGE_SIZE = 10;
+
+type StatusFilter = '' | 'pendiente' | 'listo' | 'preparado' | 'espera' | 'entregado' | 'cancelado';
+type RangeFilter = 'todo' | '7' | '30';
+
+const STATUS_OPTIONS: { value: StatusFilter; label: string }[] = [
+  { value: '', label: 'Todos los estados' },
+  { value: 'pendiente', label: 'Pendiente de pago' },
+  { value: 'espera', label: 'En espera' },
+  { value: 'preparado', label: 'Preparado' },
+  { value: 'listo', label: 'Listo para retirar' },
+  { value: 'entregado', label: 'Entregado' },
+  { value: 'cancelado', label: 'Cancelado' },
+];
+
+const RANGE_OPTIONS: { value: RangeFilter; label: string }[] = [
+  { value: 'todo', label: 'Todo el ciclo' },
+  { value: '30', label: 'Últimos 30 días' },
+  { value: '7', label: 'Últimos 7 días' },
+];
+
+function matchesStatus(order: Order, filter: StatusFilter): boolean {
+  switch (filter) {
+    case '':
+      return true;
+    case 'pendiente':
+      return order.paymentStatus === 'Pendiente de pago' && isLive(order);
+    case 'listo':
+      return order.deliveryStatus === 'Listo para retirar';
+    case 'preparado':
+      return order.deliveryStatus === 'Preparado';
+    case 'espera':
+      return order.deliveryStatus === 'En espera';
+    case 'entregado':
+      return order.deliveryStatus === 'Entregado';
+    case 'cancelado':
+      return order.deliveryStatus === 'Cancelado';
+    default:
+      return true;
+  }
 }
 
-export const OrdersView: React.FC<OrdersViewProps> = ({
-  orders,
-  onSelectOrder,
-  onOpenConfirmDelivery,
-  onOpenManualOrder,
-  onOpenPrintSheet,
-  onBulkDeliver,
-  searchQuery,
-}) => {
-  const [selectedIds, setSelectedIds] = useState<string[]>(['geo-4821', 'geo-4819', 'geo-4815']);
-  const [selectedSchool, setSelectedSchool] = useState<string>('');
-  const [selectedYear, setSelectedYear] = useState<string>('');
-  const [selectedStatus, setSelectedStatus] = useState<string>('');
-  const [isReloading, setIsReloading] = useState<boolean>(false);
-  const [currentPage, setCurrentPage] = useState<number>(1);
+/** Un pedido entregado o cancelado ya no admite acciones en lote. */
+const isActionable = (order: Order) =>
+  order.deliveryStatus !== 'Entregado' && order.deliveryStatus !== 'Cancelado';
 
-  // Filtered orders
+export const OrdersView: React.FC<{ searchQuery: string }> = ({ searchQuery }) => {
+  const { state, dispatchUndoable } = useDemo();
+  const { openOrder, confirmDelivery, openManualOrder, openPrintSheet } = useShell();
+
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [schoolFilter, setSchoolFilter] = useState('');
+  const [yearFilter, setYearFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('');
+  const [rangeFilter, setRangeFilter] = useState<RangeFilter>('todo');
+  const [isReloading, setIsReloading] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+
+  const metrics = useMemo(() => computeOrderMetrics(state.orders), [state.orders]);
+  const delta = useMemo(() => weekOverWeekDelta(state.orders), [state.orders]);
+
+  // Las opciones salen de los datos, no de una lista escrita a mano.
+  const years = useMemo(
+    () => [...new Set(state.orders.map((o) => o.year))].sort(),
+    [state.orders],
+  );
+
   const filteredOrders = useMemo(() => {
-    return orders.filter((o) => {
+    const needle = searchQuery.trim().toLowerCase();
+    const digits = needle.replace(/\D/g, '');
+    const cutoff =
+      rangeFilter === 'todo' ? 0 : Date.now() - Number(rangeFilter) * 24 * 3600_000;
+
+    return state.orders.filter((order) => {
       const matchesSearch =
-        searchQuery === '' ||
-        o.studentName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        o.studentDni.includes(searchQuery) ||
-        o.code.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        o.cartillaTitle.toLowerCase().includes(searchQuery.toLowerCase());
+        needle === '' ||
+        order.studentName.toLowerCase().includes(needle) ||
+        order.code.toLowerCase().includes(needle) ||
+        order.cartillaTitle.toLowerCase().includes(needle) ||
+        order.studentEmail.toLowerCase().includes(needle) ||
+        order.division.toLowerCase().includes(needle) ||
+        (digits.length >= 3 && order.studentDni.replace(/\D/g, '').includes(digits));
 
-      const matchesSchool =
-        selectedSchool === '' ||
-        o.schoolCode === selectedSchool ||
-        o.school.toLowerCase().includes(selectedSchool.toLowerCase());
-
-      const matchesYear = selectedYear === '' || o.year.includes(selectedYear);
-
-      const matchesStatus =
-        selectedStatus === '' ||
-        (selectedStatus === 'pendiente' && o.paymentStatus === 'Pendiente de pago') ||
-        (selectedStatus === 'listo' && o.deliveryStatus === 'Listo para retirar') ||
-        (selectedStatus === 'entregado' && o.deliveryStatus === 'Entregado');
-
-      return matchesSearch && matchesSchool && matchesYear && matchesStatus;
+      return (
+        matchesSearch &&
+        (schoolFilter === '' || order.schoolCode === schoolFilter) &&
+        (yearFilter === '' || order.year === yearFilter) &&
+        matchesStatus(order, statusFilter) &&
+        order.timestamp >= cutoff
+      );
     });
-  }, [orders, searchQuery, selectedSchool, selectedYear, selectedStatus]);
+  }, [state.orders, searchQuery, schoolFilter, yearFilter, statusFilter, rangeFilter]);
 
-  // Bulk selection handling
-  const allSelected =
-    filteredOrders.length > 0 &&
-    filteredOrders.every((o) => selectedIds.includes(o.id));
+  const totalPages = Math.max(1, Math.ceil(filteredOrders.length / PAGE_SIZE));
 
-  const toggleSelectAll = () => {
-    if (allSelected) {
-      setSelectedIds([]);
-    } else {
-      setSelectedIds(filteredOrders.map((o) => o.id));
-    }
+  // Cualquier cambio de filtro vuelve a la primera página, y si la página
+  // actual se queda sin resultados se retrocede en lugar de mostrar vacío.
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, schoolFilter, yearFilter, statusFilter, rangeFilter]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) setCurrentPage(totalPages);
+  }, [currentPage, totalPages]);
+
+  const pageStart = (currentPage - 1) * PAGE_SIZE;
+  const pageOrders = filteredOrders.slice(pageStart, pageStart + PAGE_SIZE);
+
+  // La selección masiva opera sobre lo filtrado y accionable, no sobre la página.
+  const selectableIds = useMemo(
+    () => filteredOrders.filter(isActionable).map((o) => o.id),
+    [filteredOrders],
+  );
+  const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selectedIds.includes(id));
+
+  const activeFilters =
+    (schoolFilter ? 1 : 0) + (yearFilter ? 1 : 0) + (statusFilter ? 1 : 0) + (rangeFilter !== 'todo' ? 1 : 0);
+
+  const clearFilters = () => {
+    setSchoolFilter('');
+    setYearFilter('');
+    setStatusFilter('');
+    setRangeFilter('todo');
   };
 
-  const toggleSelectItem = (id: string) => {
-    if (selectedIds.includes(id)) {
-      setSelectedIds(selectedIds.filter((item) => item !== id));
-    } else {
-      setSelectedIds([...selectedIds, id]);
-    }
-  };
-
-  // Export CSV
-  const handleExportCSV = () => {
-    const headers = [
-      'Código',
-      'Alumno',
-      'DNI',
-      'Colegio',
-      'Año',
-      'Cartilla',
-      'Método Pago',
-      'Estado Pago',
-      'Estado Entrega',
-      'Monto ARS',
-      'Fecha',
-    ];
-    const rows = filteredOrders.map((o) => [
-      o.code,
-      `"${o.studentName}"`,
-      o.studentDni,
-      `"${o.school}"`,
-      o.year,
-      `"${o.cartillaTitle}"`,
-      o.paymentMethod,
-      o.paymentStatus,
-      o.deliveryStatus,
-      o.price,
-      o.date,
-    ]);
-
-    const csvContent =
-      'data:text/csv;charset=utf-8,' +
-      [headers.join(','), ...rows.map((e) => e.join(','))].join('\n');
-
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `GeoCartillas_Pedidos_${new Date().toISOString().slice(0, 10)}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  // Microinteraction: simulate reload
-  const handleSimulateReload = () => {
+  const handleReload = () => {
     setIsReloading(true);
-    setTimeout(() => {
-      setIsReloading(false);
-    }, 700);
+    setTimeout(() => setIsReloading(false), 700);
   };
 
-  // Calculations for KPI Cards
-  const totalOrdersCount = 148;
-  const totalAmountCalc = '+$1.184.000 ARS';
-  const pendingCount = 19;
-  const readyCount = 34;
-  const deliveredCount = 95;
+  const selectClass =
+    'w-full appearance-none h-10 pl-3 pr-8 bg-surface-container-low text-on-surface text-xs rounded-lg border border-outline-variant/30 focus:outline-none focus:ring-2 focus:ring-primary cursor-pointer font-medium';
+
+  /** Acción primaria de la fila según el estado del pedido. */
+  const renderRowAction = (order: Order) => {
+    if (order.deliveryStatus === 'Cancelado') {
+      return <span className="text-[11px] text-outline font-semibold px-2.5">Cancelado</span>;
+    }
+    if (order.deliveryStatus === 'Listo para retirar') {
+      return (
+        <button
+          onClick={() => confirmDelivery(order)}
+          className="px-2.5 py-1 rounded bg-secondary text-on-secondary text-[11px] font-bold hover:bg-on-secondary-container transition-colors shadow-xs cursor-pointer active:scale-95 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-secondary"
+          type="button"
+        >
+          Marcar como entregado
+        </button>
+      );
+    }
+    if (order.paymentStatus === 'Pendiente de pago') {
+      return (
+        <button
+          onClick={() =>
+            dispatchUndoable(
+              { type: 'MARK_PAID', orderId: order.id },
+              `Pago de ${formatARS(order.price)} registrado para ${order.studentName}.`,
+            )
+          }
+          className="px-2.5 py-1 rounded bg-tertiary-container text-on-tertiary text-[11px] font-bold hover:bg-tertiary transition-colors shadow-xs cursor-pointer active:scale-95 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-primary"
+          type="button"
+        >
+          Registrar cobro
+        </button>
+      );
+    }
+    return (
+      <button
+        onClick={() => openOrder(order)}
+        className="px-2.5 py-1 rounded bg-surface-container text-primary text-[11px] font-medium hover:bg-surface-container-high transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-primary"
+        type="button"
+      >
+        Comprobante
+      </button>
+    );
+  };
 
   return (
     <div className="flex flex-col w-full gap-6">
-      {/* Sub-header & Action Controls */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex flex-col">
           <div className="flex items-center gap-1.5 text-secondary">
-            <span className="material-symbols-outlined text-[20px]">inventory_2</span>
-            <span className="text-xs font-bold uppercase tracking-wider">Control Logístico</span>
+            <Icon name="inventory_2" size={20} />
+            <span className="text-xs font-bold uppercase tracking-wider">Control logístico</span>
           </div>
           <h1 className="text-2xl sm:text-3xl font-extrabold text-primary tracking-tight mt-0.5">
-            Gestión de Pedidos de Cartillas
+            Gestión de pedidos de cartillas
           </h1>
           <p className="text-xs sm:text-sm text-on-surface-variant">
-            Supervisá la cobranza, el tiraje impreso y la entrega de cuadernillos escolares en sede institucional.
+            Supervisá la cobranza, el tiraje impreso y la entrega de cuadernillos en sede institucional.
           </p>
         </div>
 
-        {/* Quick Tool Buttons */}
         <div className="flex items-center gap-2.5 flex-wrap">
           <button
-            onClick={onOpenPrintSheet}
-            className="inline-flex items-center gap-2 px-3.5 py-2 bg-surface-container-lowest border border-surface-container-high text-on-surface-variant rounded-lg shadow-xs hover:bg-surface-container hover:text-on-surface text-xs font-semibold transition-all cursor-pointer"
+            onClick={() => openPrintSheet(schoolFilter || undefined)}
+            className="inline-flex items-center gap-2 px-3.5 py-2 bg-surface-container-lowest border border-surface-container-high text-on-surface-variant rounded-lg shadow-xs hover:bg-surface-container hover:text-on-surface text-xs font-semibold transition-all cursor-pointer focus-visible:outline-2 focus-visible:outline-primary"
             type="button"
           >
-            <span className="material-symbols-outlined text-[18px]">print</span>
-            <span>Imprimir Planilla Retiro</span>
+            <Icon name="print" size={18} />
+            <span>Imprimir planilla</span>
           </button>
 
           <button
-            onClick={onOpenManualOrder}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-on-primary rounded-lg shadow-sm hover:bg-primary-container text-xs font-bold transition-all cursor-pointer active:scale-95"
+            onClick={openManualOrder}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-on-primary rounded-lg shadow-sm hover:bg-primary-container text-xs font-bold transition-all cursor-pointer active:scale-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
             type="button"
           >
-            <span className="material-symbols-outlined text-[18px]">add</span>
-            <span>Cargar Pedido Manual</span>
+            <Icon name="add" size={18} />
+            <span>Cargar pedido manual</span>
           </button>
         </div>
       </div>
 
-      {/* KPI Summary Cards (4 Cards Grid) */}
+      {/* KPIs calculados sobre los pedidos reales */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Card 1: Pedidos Totales */}
-        <div className="relative bg-surface-container-lowest p-4 rounded-xl shadow-xs border border-surface-container-high/60 flex flex-col justify-between overflow-hidden">
-          <div className="absolute -right-6 -bottom-6 w-24 h-24 rounded-full bg-primary-fixed/30 pointer-events-none" />
-          <div className="flex items-start justify-between">
-            <div className="flex flex-col">
-              <span className="text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">
-                Pedidos Totales
-              </span>
-              <div className="flex items-baseline gap-2 mt-1">
-                <span className="text-3xl font-extrabold text-primary font-mono">{totalOrdersCount}</span>
-                <span className="text-[11px] px-2 py-0.5 rounded-full bg-secondary-container text-on-secondary-container font-bold">
-                  +12% mes
-                </span>
-              </div>
-            </div>
-            <div className="w-10 h-10 rounded-lg bg-surface-container flex items-center justify-center text-primary">
-              <span className="material-symbols-outlined text-[22px]">auto_stories</span>
-            </div>
-          </div>
-          <div className="mt-4 pt-1 flex items-center justify-between text-xs">
-            <span className="text-outline">Recaudación acumulada</span>
-            <span className="text-xs font-extrabold text-primary">{totalAmountCalc}</span>
-          </div>
-          <div className="w-full bg-surface-container h-1.5 rounded-full mt-2 overflow-hidden">
-            <div className="bg-primary h-full rounded-full transition-all duration-500" style={{ width: '78%' }} />
-          </div>
-        </div>
-
-        {/* Card 2: Pendientes de Pago (Amber) */}
-        <div className="relative bg-surface-container-lowest p-4 rounded-xl shadow-xs border border-surface-container-high/60 flex flex-col justify-between overflow-hidden">
-          <div className="absolute -right-6 -bottom-6 w-24 h-24 rounded-full bg-tertiary-fixed/30 pointer-events-none" />
-          <div className="flex items-start justify-between">
-            <div className="flex flex-col">
-              <span className="text-[11px] font-bold text-on-tertiary-container uppercase tracking-wider">
-                Pendientes de Pago
-              </span>
-              <div className="flex items-baseline gap-2 mt-1">
-                <span className="text-3xl font-extrabold text-on-tertiary-fixed font-mono">{pendingCount}</span>
-                <span className="text-[11px] px-2 py-0.5 rounded-full bg-tertiary-fixed text-on-tertiary-fixed-variant font-bold">
-                  Efectivo
-                </span>
-              </div>
-            </div>
-            <div className="w-10 h-10 rounded-lg bg-tertiary-fixed flex items-center justify-center text-on-tertiary-fixed-variant">
-              <span className="material-symbols-outlined text-[22px]">payments</span>
-            </div>
-          </div>
-          <div className="mt-4 pt-1 flex items-center justify-between text-xs">
-            <span className="text-outline">Por cobrar en sala</span>
-            <span className="text-xs font-extrabold text-on-tertiary-container">$152.000 ARS</span>
-          </div>
-          <div className="w-full bg-surface-container h-1.5 rounded-full mt-2 overflow-hidden">
-            <div className="bg-on-tertiary-container h-full rounded-full" style={{ width: '25%' }} />
-          </div>
-        </div>
-
-        {/* Card 3: Listos para Retirar (Ocean Blue) */}
-        <div className="relative bg-surface-container-lowest p-4 rounded-xl shadow-xs border border-surface-container-high/60 flex flex-col justify-between overflow-hidden">
-          <div className="absolute -right-6 -bottom-6 w-24 h-24 rounded-full bg-primary-fixed/40 pointer-events-none" />
-          <div className="flex items-start justify-between">
-            <div className="flex flex-col">
-              <span className="text-[11px] font-bold text-primary-container uppercase tracking-wider">
-                Listos para Retirar
-              </span>
-              <div className="flex items-baseline gap-2 mt-1">
-                <span className="text-3xl font-extrabold text-primary font-mono">{readyCount}</span>
-                <span className="text-[11px] px-2 py-0.5 rounded-full bg-primary-fixed text-on-primary-fixed-variant font-bold">
-                  En mesa
-                </span>
-              </div>
-            </div>
-            <div className="w-10 h-10 rounded-lg bg-primary-fixed flex items-center justify-center text-primary">
-              <span className="material-symbols-outlined text-[22px]">mark_email_read</span>
-            </div>
-          </div>
-          <div className="mt-4 pt-1 flex items-center justify-between text-xs">
-            <span className="text-outline">Ubicación</span>
-            <span className="text-xs font-semibold text-on-surface-variant">Sala de Profesores</span>
-          </div>
-          <div className="w-full bg-surface-container h-1.5 rounded-full mt-2 overflow-hidden">
-            <div className="bg-surface-tint h-full rounded-full" style={{ width: '45%' }} />
-          </div>
-        </div>
-
-        {/* Card 4: Entregados (Green) */}
-        <div className="relative bg-surface-container-lowest p-4 rounded-xl shadow-xs border border-surface-container-high/60 flex flex-col justify-between overflow-hidden">
-          <div className="absolute -right-6 -bottom-6 w-24 h-24 rounded-full bg-secondary-fixed/40 pointer-events-none" />
-          <div className="flex items-start justify-between">
-            <div className="flex flex-col">
-              <span className="text-[11px] font-bold text-secondary uppercase tracking-wider">
-                Entregados
-              </span>
-              <div className="flex items-baseline gap-2 mt-1">
-                <span className="text-3xl font-extrabold text-secondary font-mono">{deliveredCount}</span>
-                <span className="text-[11px] px-2 py-0.5 rounded-full bg-secondary-container text-on-secondary-container font-bold">
-                  64.2%
-                </span>
-              </div>
-            </div>
-            <div className="w-10 h-10 rounded-lg bg-secondary-container flex items-center justify-center text-secondary">
-              <span className="material-symbols-outlined text-[22px]">verified</span>
-            </div>
-          </div>
-          <div className="mt-4 pt-1 flex items-center justify-between text-xs">
-            <span className="text-outline">Cierre de período</span>
-            <span className="text-xs font-extrabold text-secondary">1° Trimestre</span>
-          </div>
-          <div className="w-full bg-surface-container h-1.5 rounded-full mt-2 overflow-hidden">
-            <div className="bg-secondary h-full rounded-full" style={{ width: '64%' }} />
-          </div>
-        </div>
+        <KpiCard
+          label="Pedidos totales"
+          value={metrics.total}
+          icon="auto_stories"
+          accent="primary"
+          badge={delta !== null ? `${delta >= 0 ? '+' : ''}${Math.round(delta)}% sem.` : undefined}
+          footerLabel="Recaudación acumulada"
+          footerValue={formatARS(metrics.revenue)}
+          progress={metrics.collectionRate}
+        />
+        <KpiCard
+          label="Pendientes de pago"
+          value={metrics.pendingCount}
+          icon="payments"
+          accent="amber"
+          footerLabel="Por cobrar en sala"
+          footerValue={formatARS(metrics.pendingAmount)}
+          progress={metrics.pendingCount / Math.max(1, metrics.total)}
+          onClick={() => setStatusFilter(statusFilter === 'pendiente' ? '' : 'pendiente')}
+          isActive={statusFilter === 'pendiente'}
+        />
+        <KpiCard
+          label="Listos para retirar"
+          value={metrics.readyCount}
+          icon="mark_email_read"
+          accent="primary"
+          footerLabel="En preparación"
+          footerValue={formatNumber(metrics.preparedCount + metrics.waitingCount)}
+          progress={metrics.readyCount / Math.max(1, metrics.total)}
+          onClick={() => setStatusFilter(statusFilter === 'listo' ? '' : 'listo')}
+          isActive={statusFilter === 'listo'}
+        />
+        <KpiCard
+          label="Entregados"
+          value={metrics.deliveredCount}
+          icon="task_alt"
+          accent="green"
+          footerLabel="Del total del ciclo"
+          footerValue={`${Math.round(metrics.deliveryRate * 100)}%`}
+          progress={metrics.deliveryRate}
+          onClick={() => setStatusFilter(statusFilter === 'entregado' ? '' : 'entregado')}
+          isActive={statusFilter === 'entregado'}
+        />
       </div>
 
-      {/* Filter Bar & Search Container */}
+      {/* Filtros */}
       <div className="bg-surface-container-lowest p-4 rounded-xl shadow-xs border border-surface-container-high/60 flex flex-col gap-3">
         <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
-          {/* Quick Select Dropdowns */}
           <div className="flex items-center gap-2.5 flex-wrap flex-1">
-            {/* Colegio */}
             <div className="relative min-w-[170px] flex-1 sm:flex-initial">
+              <label className="sr-only" htmlFor="filtro-colegio">Colegio</label>
               <select
-                className="w-full appearance-none h-10 pl-3 pr-8 bg-surface-container-low text-on-surface text-xs rounded-lg border border-outline-variant/30 focus:outline-none focus:ring-2 focus:ring-primary cursor-pointer font-medium"
-                value={selectedSchool}
-                onChange={(e) => setSelectedSchool(e.target.value)}
+                id="filtro-colegio"
+                className={selectClass}
+                value={schoolFilter}
+                onChange={(event) => setSchoolFilter(event.target.value)}
               >
                 <option value="">Todos los colegios</option>
-                <option value="san-martin">Col. Nacional San Martín</option>
-                <option value="belgrano">Inst. Belgrano</option>
-                <option value="normal-1">Esc. Normal N°1</option>
-                <option value="comercial-3">Comercial N°3</option>
+                {state.schools.map((school) => (
+                  <option key={school.code} value={school.code}>
+                    {school.name}
+                  </option>
+                ))}
               </select>
-              <span className="material-symbols-outlined absolute right-2.5 top-1/2 -translate-y-1/2 text-outline pointer-events-none text-[18px]">
-                expand_more
-              </span>
+              <Icon
+                name="expand_more"
+                size={18}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-outline pointer-events-none"
+              />
             </div>
 
-            {/* Año */}
             <div className="relative min-w-[130px] flex-1 sm:flex-initial">
+              <label className="sr-only" htmlFor="filtro-anio">Año</label>
               <select
-                className="w-full appearance-none h-10 pl-3 pr-8 bg-surface-container-low text-on-surface text-xs rounded-lg border border-outline-variant/30 focus:outline-none focus:ring-2 focus:ring-primary cursor-pointer font-medium"
-                value={selectedYear}
-                onChange={(e) => setSelectedYear(e.target.value)}
+                id="filtro-anio"
+                className={selectClass}
+                value={yearFilter}
+                onChange={(event) => setYearFilter(event.target.value)}
               >
                 <option value="">Todos los años</option>
-                <option value="2">2° Año</option>
-                <option value="3">3° Año</option>
-                <option value="4">4° Año</option>
-                <option value="5">5° Año</option>
+                {years.map((year) => (
+                  <option key={year} value={year}>
+                    {year}
+                  </option>
+                ))}
               </select>
-              <span className="material-symbols-outlined absolute right-2.5 top-1/2 -translate-y-1/2 text-outline pointer-events-none text-[18px]">
-                expand_more
-              </span>
+              <Icon
+                name="expand_more"
+                size={18}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-outline pointer-events-none"
+              />
             </div>
 
-            {/* Estado */}
             <div className="relative min-w-[160px] flex-1 sm:flex-initial">
+              <label className="sr-only" htmlFor="filtro-estado">Estado</label>
               <select
-                className="w-full appearance-none h-10 pl-3 pr-8 bg-surface-container-low text-on-surface text-xs rounded-lg border border-outline-variant/30 focus:outline-none focus:ring-2 focus:ring-primary cursor-pointer font-medium"
-                value={selectedStatus}
-                onChange={(e) => setSelectedStatus(e.target.value)}
+                id="filtro-estado"
+                className={selectClass}
+                value={statusFilter}
+                onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}
               >
-                <option value="">Todos los estados</option>
-                <option value="pendiente">Pendiente de pago</option>
-                <option value="listo">Listo para retirar</option>
-                <option value="entregado">Entregado</option>
+                {STATUS_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
               </select>
-              <span className="material-symbols-outlined absolute right-2.5 top-1/2 -translate-y-1/2 text-outline pointer-events-none text-[18px]">
-                expand_more
-              </span>
+              <Icon
+                name="expand_more"
+                size={18}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-outline pointer-events-none"
+              />
             </div>
 
-            {/* Date Range indicator */}
-            <button
-              className="inline-flex items-center gap-1.5 h-10 px-3 bg-surface-container-low text-on-surface text-xs rounded-lg border border-outline-variant/30 hover:bg-surface-container transition-colors cursor-pointer"
-              type="button"
-              title="Período lectivo activo"
-            >
-              <span className="material-symbols-outlined text-[16px] text-outline">calendar_today</span>
-              <span>01 Mar 2025 - 15 Mar 2025</span>
-            </button>
+            <div className="relative min-w-[150px] flex-1 sm:flex-initial">
+              <label className="sr-only" htmlFor="filtro-rango">Período</label>
+              <select
+                id="filtro-rango"
+                className={selectClass}
+                value={rangeFilter}
+                onChange={(event) => setRangeFilter(event.target.value as RangeFilter)}
+              >
+                {RANGE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <Icon
+                name="calendar_today"
+                size={16}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-outline pointer-events-none"
+              />
+            </div>
+
+            {activeFilters > 0 && (
+              <button
+                onClick={clearFilters}
+                className="inline-flex items-center gap-1.5 h-10 px-3 text-xs font-semibold text-primary hover:bg-surface-container rounded-lg transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-primary"
+                type="button"
+              >
+                <Icon name="filter_alt_off" size={16} />
+                Limpiar {activeFilters} filtro{activeFilters > 1 ? 's' : ''}
+              </button>
+            )}
           </div>
 
-          {/* Export CSV Button */}
           <button
-            onClick={handleExportCSV}
-            className="inline-flex items-center justify-center gap-1.5 h-10 px-4 bg-surface-container-high text-primary font-bold text-xs rounded-lg hover:bg-primary hover:text-on-primary transition-colors cursor-pointer shrink-0"
+            onClick={() => exportOrdersCsv(filteredOrders)}
+            disabled={filteredOrders.length === 0}
+            className="inline-flex items-center justify-center gap-1.5 h-10 px-4 bg-surface-container-high text-primary font-bold text-xs rounded-lg hover:bg-primary hover:text-on-primary transition-colors cursor-pointer shrink-0 disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
             type="button"
           >
-            <span className="material-symbols-outlined text-[18px]">download</span>
-            <span>Exportar CSV</span>
+            <Icon name="download" size={18} />
+            <span>Exportar CSV ({filteredOrders.length})</span>
           </button>
         </div>
       </div>
 
-      {/* Bulk Action Banner */}
+      {/* Acciones en lote */}
       {selectedIds.length > 0 && (
         <div className="bg-primary text-on-primary px-5 py-3 rounded-xl shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in duration-200">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-full bg-primary-fixed text-on-primary-fixed flex items-center justify-center font-bold text-xs">
+            <div className="w-8 h-8 rounded-full bg-primary-fixed text-on-primary-fixed flex items-center justify-center font-bold text-xs shrink-0">
               {selectedIds.length}
             </div>
             <div className="flex flex-col">
               <span className="text-xs font-bold">
-                {selectedIds.length} pedidos seleccionados
+                {selectedIds.length} pedido{selectedIds.length > 1 ? 's' : ''} seleccionado
+                {selectedIds.length > 1 ? 's' : ''}
               </span>
               <span className="text-[11px] text-on-primary-container">
-                Podés procesar el retiro colectivo de estas cartillas preparadas.
+                Los que tengan el pago pendiente quedan cobrados al entregarlos.
               </span>
             </div>
           </div>
           <div className="flex items-center gap-2">
             <button
-              onClick={() => onBulkDeliver(selectedIds)}
-              className="px-3.5 py-1.5 rounded-lg bg-surface-container-lowest text-primary hover:bg-secondary-container hover:text-on-secondary-container transition-all text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer shadow-xs"
+              onClick={() => {
+                const ids = [...selectedIds];
+                dispatchUndoable(
+                  { type: 'BULK_DELIVER', orderIds: ids },
+                  `${ids.length} cartillas marcadas como entregadas.`,
+                );
+                setSelectedIds([]);
+              }}
+              className="px-3.5 py-1.5 rounded-lg bg-surface-container-lowest text-primary hover:bg-secondary-container hover:text-on-secondary-container transition-all text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer shadow-xs focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-secondary-fixed-dim"
               type="button"
             >
-              <span className="material-symbols-outlined text-[16px]">done_all</span>
-              <span>Marcar seleccionados como entregados</span>
+              <Icon name="done_all" size={16} />
+              <span>Marcar como entregados</span>
             </button>
             <button
               onClick={() => setSelectedIds([])}
-              className="px-3 py-1.5 rounded-lg text-on-primary hover:bg-primary-container transition-colors text-xs font-medium cursor-pointer"
+              className="px-3 py-1.5 rounded-lg text-on-primary hover:bg-primary-container transition-colors text-xs font-medium cursor-pointer focus-visible:outline-2 focus-visible:outline-secondary-fixed-dim"
               type="button"
             >
               Desmarcar
@@ -403,307 +431,281 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
         </div>
       )}
 
-      {/* Data Table Section */}
+      {/* Tabla (escritorio) y tarjetas (mobile) */}
       <div className="bg-surface-container-lowest rounded-xl shadow-xs border border-surface-container-high/60 overflow-hidden flex flex-col">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse min-w-[1020px]">
-            <thead>
-              <tr className="bg-surface-container-low text-on-surface-variant text-[11px] tracking-wider uppercase font-bold border-b border-surface-container-high/50">
-                <th className="py-3.5 px-4 w-12 text-center">
-                  <input
-                    checked={allSelected}
-                    onChange={toggleSelectAll}
-                    className="w-4 h-4 rounded text-primary focus:ring-primary cursor-pointer accent-primary"
-                    type="checkbox"
-                  />
-                </th>
-                <th className="py-3.5 px-3">Código</th>
-                <th className="py-3.5 px-3">Alumno</th>
-                <th className="py-3.5 px-3">Colegio</th>
-                <th className="py-3.5 px-3">Año</th>
-                <th className="py-3.5 px-3">Cartilla Pedida</th>
-                <th className="py-3.5 px-3">Método Pago</th>
-                <th className="py-3.5 px-3">Estado Pago</th>
-                <th className="py-3.5 px-3">Estado Entrega</th>
-                <th className="py-3.5 px-3">Fecha</th>
-                <th className="py-3.5 px-4 text-right">Acciones</th>
-              </tr>
-            </thead>
-            <tbody className="text-xs text-on-surface divide-y divide-surface-container-high/40">
-              {isReloading ? (
-                <tr>
-                  <td colSpan={11} className="py-12 text-center">
-                    <div className="flex flex-col items-center justify-center gap-2 text-primary">
-                      <span className="material-symbols-outlined text-[32px] animate-spin">sync</span>
-                      <span className="font-semibold text-xs">Actualizando listado de cartillas...</span>
-                    </div>
-                  </td>
-                </tr>
-              ) : filteredOrders.length === 0 ? (
-                <tr>
-                  <td colSpan={11} className="py-12 text-center">
-                    <div className="flex flex-col items-center justify-center gap-1 text-on-surface-variant">
-                      <span className="material-symbols-outlined text-[32px] text-outline">search_off</span>
-                      <p className="font-bold text-sm text-primary">No se encontraron pedidos con estos filtros</p>
-                      <p className="text-xs text-outline">Probá cambiando el colegio o limpiando el texto de búsqueda.</p>
-                    </div>
-                  </td>
-                </tr>
-              ) : (
-                filteredOrders.map((order) => {
-                  const isChecked = selectedIds.includes(order.id);
-                  const isPaid = order.paymentStatus === 'Pagado';
-                  const isDelivered = order.deliveryStatus === 'Entregado';
-                  const isReady = order.deliveryStatus === 'Listo para retirar';
-
-                  return (
-                    <tr
-                      key={order.id}
-                      className={`hover:bg-surface-container-low/70 transition-colors ${
-                        isChecked ? 'bg-primary-fixed/10' : ''
-                      }`}
-                    >
-                      <td className="py-3.5 px-4 text-center">
-                        <input
-                          checked={isChecked}
-                          onChange={() => toggleSelectItem(order.id)}
-                          className="w-4 h-4 rounded text-primary focus:ring-primary cursor-pointer accent-primary"
-                          type="checkbox"
-                        />
-                      </td>
-
-                      <td className="py-3.5 px-3">
-                        <span
-                          className={`font-mono font-bold text-xs px-2 py-0.5 rounded ${
-                            isReady
-                              ? 'bg-primary-fixed text-primary'
-                              : 'bg-surface-container text-on-surface-variant'
-                          }`}
-                        >
-                          {order.code}
-                        </span>
-                      </td>
-
-                      <td className="py-3.5 px-3">
-                        <div className="flex flex-col">
-                          <span className="font-bold text-on-surface">{order.studentName}</span>
-                          <span className="text-[11px] text-outline">DNI {order.studentDni}</span>
-                        </div>
-                      </td>
-
-                      <td className="py-3.5 px-3">
-                        <span className="text-on-surface font-medium truncate max-w-[150px] inline-block">
-                          {order.school}
-                        </span>
-                      </td>
-
-                      <td className="py-3.5 px-3">
-                        <span className="inline-block px-2 py-0.5 rounded bg-surface-container text-on-surface-variant text-[11px] font-bold">
-                          {order.year}
-                        </span>
-                      </td>
-
-                      <td className="py-3.5 px-3">
-                        <div className="flex items-center gap-1.5">
-                          <span className="material-symbols-outlined text-[16px] text-primary">
-                            menu_book
-                          </span>
-                          <span className="truncate max-w-[200px] font-medium" title={order.cartillaTitle}>
-                            {order.cartillaTitle}
-                          </span>
-                        </div>
-                      </td>
-
-                      <td className="py-3.5 px-3">
-                        <span className="inline-flex items-center gap-1.5 text-on-surface-variant font-medium whitespace-nowrap">
-                          <span
-                            className={`w-2 h-2 rounded-full ${
-                              order.paymentMethod === 'Mercado Pago' ? 'bg-primary' : 'bg-tertiary-container'
-                            }`}
+        {isReloading ? (
+          <SkeletonRows rows={PAGE_SIZE} columns={6} />
+        ) : filteredOrders.length === 0 ? (
+          <EmptyState
+            icon="search_off"
+            title="No se encontraron pedidos con estos filtros"
+            message="Probá cambiando el colegio, el estado o limpiando el texto de búsqueda del encabezado."
+            action={
+              activeFilters > 0 || searchQuery
+                ? { label: 'Limpiar filtros', onClick: clearFilters, icon: 'filter_alt_off' }
+                : { label: 'Cargar pedido manual', onClick: openManualOrder, icon: 'add' }
+            }
+          />
+        ) : (
+          <>
+            {/* Tabla para pantallas grandes */}
+            <div className="hidden lg:block overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-surface-container-low text-on-surface-variant text-[11px] tracking-wider uppercase font-bold border-b border-surface-container-high/50">
+                    <th className="py-3.5 px-4 w-12 text-center">
+                      <input
+                        checked={allSelected}
+                        onChange={() => setSelectedIds(allSelected ? [] : selectableIds)}
+                        className="w-4 h-4 rounded cursor-pointer accent-primary"
+                        type="checkbox"
+                        aria-label="Seleccionar todos los pedidos filtrados"
+                      />
+                    </th>
+                    <th className="py-3.5 px-3">Código</th>
+                    <th className="py-3.5 px-3">Alumno</th>
+                    <th className="py-3.5 px-3">Colegio</th>
+                    <th className="py-3.5 px-3">Cartilla pedida</th>
+                    <th className="py-3.5 px-3">Método pago</th>
+                    <th className="py-3.5 px-3">Estado pago</th>
+                    <th className="py-3.5 px-3">Estado entrega</th>
+                    <th className="py-3.5 px-3">Fecha</th>
+                    <th className="py-3.5 px-4 text-right">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody className="text-xs text-on-surface divide-y divide-surface-container-high/40">
+                  {pageOrders.map((order) => {
+                    const isChecked = selectedIds.includes(order.id);
+                    return (
+                      <tr
+                        key={order.id}
+                        className={`transition-colors ${
+                          isChecked ? 'bg-primary-fixed/10' : 'hover:bg-surface-container-low/70'
+                        } ${order.deliveryStatus === 'Cancelado' ? 'opacity-60' : ''}`}
+                      >
+                        <td className="py-3.5 px-4 text-center">
+                          <input
+                            checked={isChecked}
+                            disabled={!isActionable(order)}
+                            onChange={() =>
+                              setSelectedIds((prev) =>
+                                prev.includes(order.id)
+                                  ? prev.filter((id) => id !== order.id)
+                                  : [...prev, order.id],
+                              )
+                            }
+                            className="w-4 h-4 rounded cursor-pointer accent-primary disabled:opacity-30 disabled:cursor-not-allowed"
+                            type="checkbox"
+                            aria-label={`Seleccionar pedido ${order.code}`}
                           />
-                          {order.paymentMethod}
-                        </span>
-                      </td>
+                        </td>
 
-                      <td className="py-3.5 px-3">
-                        {isPaid ? (
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-primary-fixed text-on-primary-fixed text-[11px] font-bold">
-                            <span className="w-1.5 h-1.5 rounded-full bg-primary" />
-                            Pagado
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-tertiary-fixed text-on-tertiary-fixed text-[11px] font-bold">
-                            <span className="w-1.5 h-1.5 rounded-full bg-on-tertiary-container" />
-                            Pendiente de pago
-                          </span>
-                        )}
-                      </td>
-
-                      <td className="py-3.5 px-3">
-                        {isReady ? (
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-primary-fixed text-on-primary-fixed text-[11px] font-bold">
-                            <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-                            Listo para retirar
-                          </span>
-                        ) : isDelivered ? (
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-secondary-container text-on-secondary-container text-[11px] font-bold">
-                            <span className="w-1.5 h-1.5 rounded-full bg-secondary" />
-                            Entregado
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-surface-container text-outline text-[11px] font-bold">
-                            <span className="w-1.5 h-1.5 rounded-full bg-outline" />
-                            {order.deliveryStatus}
-                          </span>
-                        )}
-                      </td>
-
-                      <td className="py-3.5 px-3 text-outline whitespace-nowrap text-[11px] font-mono">
-                        {order.date}
-                      </td>
-
-                      <td className="py-3.5 px-4 text-right whitespace-nowrap">
-                        <div className="inline-flex items-center gap-1.5">
+                        <td className="py-3.5 px-3">
                           <button
-                            onClick={() => onSelectOrder(order)}
-                            className="p-1 rounded text-on-surface-variant hover:bg-surface-container cursor-pointer"
-                            title="Ver detalle del pedido"
+                            onClick={() => openOrder(order)}
+                            className="font-mono font-bold text-primary hover:underline cursor-pointer focus-visible:outline-2 focus-visible:outline-primary rounded"
                             type="button"
                           >
-                            <span className="material-symbols-outlined text-[18px]">visibility</span>
+                            {order.code}
                           </button>
+                        </td>
 
-                          {isReady ? (
-                            <button
-                              onClick={() => onOpenConfirmDelivery(order)}
-                              className="px-2.5 py-1 rounded bg-secondary text-on-secondary text-[11px] font-bold hover:bg-secondary/90 transition-colors shadow-xs cursor-pointer active:scale-95"
-                              type="button"
-                            >
-                              Marcar como entregado
-                            </button>
-                          ) : !isPaid ? (
-                            <button
-                              onClick={() => onSelectOrder(order)}
-                              className="px-2.5 py-1 rounded bg-tertiary-container text-on-tertiary text-[11px] font-bold hover:bg-tertiary transition-colors shadow-xs cursor-pointer active:scale-95"
-                              type="button"
-                            >
-                              Cobrar y entregar
-                            </button>
-                          ) : (
-                            <button
-                              onClick={() => onSelectOrder(order)}
-                              className="px-2.5 py-1 rounded bg-surface-container text-primary text-[11px] font-medium hover:bg-surface-container-high transition-colors cursor-pointer"
-                              type="button"
-                            >
-                              Comprobante
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
+                        <td className="py-3.5 px-3">
+                          <div className="flex flex-col">
+                            <span className="font-bold text-on-surface">{order.studentName}</span>
+                            <span className="text-[11px] text-outline font-mono">DNI {order.studentDni}</span>
+                          </div>
+                        </td>
 
-        {/* Pagination & Overview Bar */}
-        <div className="px-6 py-3.5 bg-surface-container-low border-t border-surface-container-high/40 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
-          <div className="flex items-center gap-3">
-            <span className="text-on-surface-variant">
-              Mostrando <strong className="text-on-surface font-semibold">1 a {filteredOrders.length}</strong> de{' '}
-              <strong className="text-on-surface font-semibold">{totalOrdersCount}</strong> pedidos
-            </span>
-            <span className="hidden md:inline text-outline">•</span>
-            <button
-              onClick={handleSimulateReload}
-              className="hidden md:inline-flex items-center gap-1 text-[11px] font-bold text-outline hover:text-primary transition-colors cursor-pointer"
-              type="button"
-            >
-              <span className="material-symbols-outlined text-[16px]">hourglass_empty</span>
-              <span>Simular recarga</span>
-            </button>
+                        <td className="py-3.5 px-3 max-w-[11rem]">
+                          <div className="flex flex-col" title={order.school}>
+                            <span className="text-on-surface-variant truncate">
+                              {shortSchoolName(order.school)}
+                            </span>
+                            <span className="text-[11px] text-outline truncate">{order.division}</span>
+                          </div>
+                        </td>
+
+                        <td className="py-3.5 px-3">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <BookletCover
+                              coverUrl={order.cartillaCover}
+                              motif={
+                                state.cartillas.find((c) => c.id === order.cartillaId)?.coverMotif ??
+                                'topographic'
+                              }
+                              seed={order.cartillaId}
+                              className="w-7 h-10 rounded shrink-0 shadow-xs"
+                            />
+                            <div className="flex flex-col min-w-0">
+                              <span className="truncate max-w-[13rem]" title={order.cartillaTitle}>
+                                {order.cartillaTitle}
+                              </span>
+                              <span className="text-[11px] text-outline">
+                                {order.cartillaPages} págs. · {formatARS(order.price)}
+                              </span>
+                            </div>
+                          </div>
+                        </td>
+
+                        <td className="py-3.5 px-3">
+                          <PaymentMethodLabel method={order.paymentMethod} />
+                        </td>
+
+                        <td className="py-3.5 px-3">
+                          <PaymentChip status={order.paymentStatus} />
+                        </td>
+
+                        <td className="py-3.5 px-3">
+                          <DeliveryChip status={order.deliveryStatus} />
+                        </td>
+
+                        <td className="py-3.5 px-3 text-outline whitespace-nowrap text-[11px] font-mono">
+                          {order.date}
+                        </td>
+
+                        <td className="py-3.5 px-4 text-right whitespace-nowrap">
+                          <div className="inline-flex items-center gap-1.5">
+                            <button
+                              onClick={() => openOrder(order)}
+                              className="p-1 rounded text-on-surface-variant hover:bg-surface-container cursor-pointer focus-visible:outline-2 focus-visible:outline-primary"
+                              title={`Ver detalle de ${order.code}`}
+                              type="button"
+                            >
+                              <Icon name="visibility" size={18} />
+                            </button>
+                            {renderRowAction(order)}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Tarjetas para mobile */}
+            <ul className="lg:hidden divide-y divide-surface-container-high/40">
+              {pageOrders.map((order) => (
+                <li key={order.id} className={`p-4 flex flex-col gap-2.5 ${order.deliveryStatus === 'Cancelado' ? 'opacity-60' : ''}`}>
+                  <div className="flex items-start gap-3">
+                    <input
+                      checked={selectedIds.includes(order.id)}
+                      disabled={!isActionable(order)}
+                      onChange={() =>
+                        setSelectedIds((prev) =>
+                          prev.includes(order.id)
+                            ? prev.filter((id) => id !== order.id)
+                            : [...prev, order.id],
+                        )
+                      }
+                      className="w-4 h-4 rounded cursor-pointer accent-primary mt-0.5 shrink-0 disabled:opacity-30"
+                      type="checkbox"
+                      aria-label={`Seleccionar pedido ${order.code}`}
+                    />
+                    <BookletCover
+                      coverUrl={order.cartillaCover}
+                      motif={
+                        state.cartillas.find((c) => c.id === order.cartillaId)?.coverMotif ?? 'topographic'
+                      }
+                      seed={order.cartillaId}
+                      className="w-10 h-14 rounded shrink-0 shadow-xs"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono font-bold text-primary text-xs">{order.code}</span>
+                        <span className="text-[10px] text-outline font-mono">{order.date}</span>
+                      </div>
+                      <span className="block text-sm font-bold text-on-surface truncate">
+                        {order.studentName}
+                      </span>
+                      <span className="block text-[11px] text-outline truncate">
+                        {order.division} · {order.school}
+                      </span>
+                      <span className="block text-[11px] text-on-surface-variant truncate mt-0.5">
+                        {order.cartillaTitle}
+                      </span>
+                    </div>
+                    <span className="text-xs font-extrabold text-primary font-mono shrink-0">
+                      {formatARS(order.price)}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2 flex-wrap pl-7">
+                    <PaymentChip status={order.paymentStatus} />
+                    <DeliveryChip status={order.deliveryStatus} />
+                  </div>
+
+                  <div className="flex items-center gap-2 pl-7">
+                    <button
+                      onClick={() => openOrder(order)}
+                      className="px-2.5 py-1.5 rounded bg-surface-container text-primary text-[11px] font-semibold hover:bg-surface-container-high cursor-pointer focus-visible:outline-2 focus-visible:outline-primary"
+                      type="button"
+                    >
+                      Ver detalle
+                    </button>
+                    {renderRowAction(order)}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+
+        {/* Pie con paginación real */}
+        {filteredOrders.length > 0 && !isReloading && (
+          <div className="px-4 py-3 border-t border-surface-container-high/50 bg-surface-container-low/40 flex flex-col sm:flex-row items-center justify-between gap-3 text-[11px]">
+            <div className="flex items-center gap-3 flex-wrap justify-center">
+              <span className="text-on-surface-variant">
+                Mostrando{' '}
+                <strong className="text-on-surface font-semibold">
+                  {pageStart + 1} a {Math.min(pageStart + PAGE_SIZE, filteredOrders.length)}
+                </strong>{' '}
+                de <strong className="text-on-surface font-semibold">{filteredOrders.length}</strong> pedidos
+                {filteredOrders.length !== state.orders.length && (
+                  <span className="text-outline"> (filtrados de {state.orders.length})</span>
+                )}
+              </span>
+
+              <button
+                onClick={handleReload}
+                className="inline-flex items-center gap-1 text-primary font-semibold hover:underline cursor-pointer focus-visible:outline-2 focus-visible:outline-primary rounded"
+                type="button"
+              >
+                <Icon name="refresh" size={16} />
+                <span>Simular recarga</span>
+              </button>
+            </div>
+
+            <Pagination
+              currentPage={currentPage}
+              totalPages={totalPages}
+              onPageChange={setCurrentPage}
+            />
           </div>
-
-          <div className="flex items-center gap-1 font-mono">
-            <button
-              className="w-7 h-7 rounded-lg flex items-center justify-center text-outline bg-surface-container-lowest opacity-50 cursor-not-allowed"
-              disabled
-              type="button"
-            >
-              <span className="material-symbols-outlined text-[16px]">chevron_left</span>
-            </button>
-            <button
-              onClick={() => setCurrentPage(1)}
-              className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold ${
-                currentPage === 1
-                  ? 'bg-primary text-on-primary shadow-xs'
-                  : 'bg-surface-container-lowest text-on-surface hover:bg-surface-container'
-              }`}
-              type="button"
-            >
-              1
-            </button>
-            <button
-              onClick={() => setCurrentPage(2)}
-              className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold ${
-                currentPage === 2
-                  ? 'bg-primary text-on-primary shadow-xs'
-                  : 'bg-surface-container-lowest text-on-surface hover:bg-surface-container'
-              }`}
-              type="button"
-            >
-              2
-            </button>
-            <button
-              onClick={() => setCurrentPage(3)}
-              className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold ${
-                currentPage === 3
-                  ? 'bg-primary text-on-primary shadow-xs'
-                  : 'bg-surface-container-lowest text-on-surface hover:bg-surface-container'
-              }`}
-              type="button"
-            >
-              3
-            </button>
-            <span className="px-1 text-outline">...</span>
-            <button
-              className="w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold text-on-surface bg-surface-container-lowest hover:bg-surface-container"
-              type="button"
-            >
-              25
-            </button>
-            <button
-              className="w-7 h-7 rounded-lg flex items-center justify-center text-on-surface bg-surface-container-lowest hover:bg-surface-container"
-              type="button"
-            >
-              <span className="material-symbols-outlined text-[16px]">chevron_right</span>
-            </button>
-          </div>
-        </div>
+        )}
       </div>
 
-      {/* Educational Context Notice (Footer callout) */}
+      {/* Pie institucional */}
       <div className="p-4 bg-surface-container-low rounded-xl border border-surface-container-high/60 flex flex-col md:flex-row items-center justify-between gap-3 text-xs">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-lg bg-surface-container-lowest flex items-center justify-center text-primary shrink-0 shadow-xs">
-            <span className="material-symbols-outlined text-[22px]">school</span>
+            <Icon name="school" size={22} />
           </div>
           <div className="flex flex-col">
             <span className="font-bold text-on-surface">Coordinación de Cartillas de Geografía</span>
             <span className="text-on-surface-variant">
-              Próxima remesa de imprenta: Viernes 21 de Marzo, 08:30 hs. Disponibles en sala docente.
+              Próxima remesa: {state.schools[0]?.nextDelivery ?? 'a confirmar'}. Disponibles en sala docente.
             </span>
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <span className="text-outline">Soporte docente directo:</span>
           <a
-            href="tel:+5491158209411"
-            className="font-bold text-primary font-mono hover:underline"
+            href={`tel:${(state.schools[0]?.phone ?? '').replace(/\D/g, '')}`}
+            className="font-bold text-primary font-mono hover:underline focus-visible:outline-2 focus-visible:outline-primary rounded"
           >
-            +54 9 11 5820-9411
+            {state.schools[0]?.phone}
           </a>
         </div>
       </div>

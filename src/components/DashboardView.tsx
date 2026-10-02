@@ -264,7 +264,7 @@ export const DashboardView: React.FC = () => {
             />
           }
         >
-          <HorizontalBars data={topBars} labelWidth={150} />
+          <HorizontalBars data={topBars} labelWidth={178} />
         </ChartCard>
 
         <section className="bg-surface-container-lowest rounded-xl p-4 shadow-xs border border-surface-container-high/60 flex flex-col">
