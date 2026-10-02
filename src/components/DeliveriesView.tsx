@@ -8,6 +8,7 @@ import { EmptyState } from './ui/EmptyState.tsx';
 import { ConfirmDialog } from './ui/ConfirmDialog.tsx';
 import { DeliveryChip, PaymentChip } from './ui/StatusChip.tsx';
 import { exportOrdersCsv } from '../lib/csv.ts';
+import { badgeInk, schoolColor, schoolInitials } from '../lib/schoolColors.ts';
 
 /** Días que faltan para una fecha, en lenguaje natural. */
 function countdown(timestamp: number): { label: string; urgent: boolean } {
@@ -71,23 +72,44 @@ export const DeliveriesView: React.FC = () => {
           const timing = countdown(school.nextDeliveryAt);
           const isExpanded = expanded === school.code;
           const pendingAmount = pendingPayment.reduce((sum, order) => sum + order.price, 0);
+          const color = schoolColor(state.schools, school.code);
 
           return (
             <section
               key={school.code}
-              className="bg-surface-container-lowest rounded-xl shadow-xs border border-surface-container-high/60 flex flex-col overflow-hidden"
+              // El filete lateral y la insignia llevan el color del colegio:
+              // antes las cinco tarjetas eran identicas y no habia donde
+              // apoyar la vista para volver a la correcta.
+              className="bg-surface-container-lowest rounded-xl shadow-xs border border-surface-container-high/60 border-l-4 flex flex-col overflow-hidden"
+              style={{ borderLeftColor: color }}
             >
               <div className="p-4 flex flex-col gap-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
+                <div className="flex items-start gap-3">
+                  <span
+                    className="shrink-0 w-9 h-9 rounded-lg flex items-center justify-center text-xs font-extrabold tracking-tight"
+                    style={{ backgroundColor: color, color: badgeInk(color) }}
+                    aria-hidden="true"
+                  >
+                    {schoolInitials(school.name)}
+                  </span>
+                  <div className="min-w-0 flex-1">
                     <h2 className="text-sm font-bold text-primary leading-snug">{school.name}</h2>
                     <p className="text-[11px] text-outline mt-0.5 flex items-center gap-1">
                       <Icon name="person" size={13} />
                       {school.coordinator}
                     </p>
                   </div>
+                </div>
+
+                {/* Fecha y cuenta regresiva juntas: eran dos renglones diciendo
+                    lo mismo con distinto formato. */}
+                <div className="bg-surface-container-low rounded-lg pl-3 pr-2 py-2 flex items-center gap-2">
+                  <Icon name="event" size={16} className="text-primary shrink-0" />
+                  <span className="text-[11px] font-semibold text-on-surface min-w-0 truncate">
+                    {formatDeliveryWindow(school.nextDeliveryAt)}
+                  </span>
                   <span
-                    className={`shrink-0 text-[11px] font-bold px-2 py-0.5 rounded-full ${
+                    className={`ml-auto shrink-0 text-[11px] font-bold px-2 py-0.5 rounded-full ${
                       timing.urgent
                         ? 'bg-tertiary-fixed text-on-tertiary-fixed-variant'
                         : 'bg-surface-container text-on-surface-variant'
@@ -97,27 +119,32 @@ export const DeliveriesView: React.FC = () => {
                   </span>
                 </div>
 
-                <div className="bg-surface-container-low rounded-lg px-3 py-2 flex items-center gap-2">
-                  <Icon name="event" size={16} className="text-primary shrink-0" />
-                  <span className="text-[11px] font-semibold text-on-surface">
-                    {formatDeliveryWindow(school.nextDeliveryAt)}
-                  </span>
-                </div>
-
+                {/* Las cifras van sobre superficie neutra. Antes cada tarjeta
+                    aportaba cuatro bloques de color y, repetidos cinco veces,
+                    tapaban lo unico que distingue a un colegio de otro. */}
                 <div className="grid grid-cols-4 gap-2 text-center">
                   {[
-                    { label: 'Listos', value: ready.length, tone: 'bg-primary-fixed text-on-primary-fixed' },
-                    { label: 'Preparados', value: prepared.length, tone: 'bg-surface-container text-on-surface-variant' },
-                    { label: 'En espera', value: waiting.length, tone: 'bg-surface-container text-on-surface-variant' },
-                    {
-                      label: 'Por cobrar',
-                      value: pendingPayment.length,
-                      tone: 'bg-tertiary-fixed text-on-tertiary-fixed-variant',
-                    },
+                    { label: 'Listos', value: ready.length, accent: color },
+                    { label: 'Preparados', value: prepared.length },
+                    { label: 'En espera', value: waiting.length },
+                    { label: 'Por cobrar', value: pendingPayment.length, warn: true },
                   ].map((stat) => (
-                    <div key={stat.label} className={`rounded-lg py-1.5 ${stat.tone}`}>
-                      <span className="block text-lg font-extrabold font-mono leading-none">{stat.value}</span>
-                      <span className="block text-[9px] font-bold uppercase tracking-wider mt-0.5">
+                    <div key={stat.label} className="rounded-lg py-1.5 bg-surface-container-low">
+                      <span
+                        className={`block text-lg font-extrabold font-mono leading-none ${
+                          stat.value === 0
+                            ? 'text-outline'
+                            : stat.warn
+                              ? 'text-on-tertiary-fixed-variant'
+                              : 'text-on-surface'
+                        }`}
+                        // Un cero no tiene por que gritar: solo se pinta la
+                        // cifra que pide accion.
+                        style={stat.accent && stat.value > 0 ? { color: stat.accent } : undefined}
+                      >
+                        {stat.value}
+                      </span>
+                      <span className="block text-[9px] font-bold uppercase tracking-wider mt-0.5 text-on-surface-variant">
                         {stat.label}
                       </span>
                     </div>
@@ -125,9 +152,10 @@ export const DeliveriesView: React.FC = () => {
                 </div>
 
                 {pendingPayment.length > 0 && (
-                  <p className="text-[11px] text-on-tertiary-container flex items-center gap-1.5">
-                    <Icon name="payments" size={14} />
-                    Hay {formatARS(pendingAmount)} por cobrar en esta jornada.
+                  <p className="text-[11px] text-on-surface-variant flex items-center gap-1.5">
+                    <Icon name="payments" size={14} className="text-on-tertiary-fixed-variant" />
+                    Hay <strong className="text-on-tertiary-fixed-variant">{formatARS(pendingAmount)}</strong> por
+                    cobrar en esta jornada.
                   </p>
                 )}
 
@@ -144,7 +172,7 @@ export const DeliveriesView: React.FC = () => {
 
                   <button
                     onClick={() => openPrintSheet(school.code)}
-                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-surface-container text-primary text-xs font-semibold hover:bg-surface-container-high transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-primary"
+                    className="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-lg text-on-surface-variant text-xs font-semibold hover:bg-surface-container hover:text-primary transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-primary"
                     type="button"
                   >
                     <Icon name="print" size={16} />
@@ -158,7 +186,7 @@ export const DeliveriesView: React.FC = () => {
                         school.code,
                       )
                     }
-                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-surface-container text-primary text-xs font-semibold hover:bg-surface-container-high transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-primary"
+                    className="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-lg text-on-surface-variant text-xs font-semibold hover:bg-surface-container hover:text-primary transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-primary"
                     type="button"
                   >
                     <Icon name="download" size={16} />
