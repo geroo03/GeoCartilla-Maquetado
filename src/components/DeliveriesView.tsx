@@ -86,11 +86,18 @@ export const DeliveriesView: React.FC = () => {
               <div className="p-4 flex flex-col gap-3">
                 <div className="flex items-start gap-3">
                   <span
-                    className="shrink-0 w-9 h-9 rounded-lg flex items-center justify-center text-xs font-extrabold tracking-tight"
-                    style={{ backgroundColor: color, color: badgeInk(color) }}
+                    className="shrink-0 w-9 h-9 rounded-lg flex items-center justify-center overflow-hidden text-xs font-extrabold tracking-tight"
+                    style={{
+                      backgroundColor: school.logoUrl ? 'transparent' : color,
+                      color: badgeInk(color),
+                    }}
                     aria-hidden="true"
                   >
-                    {schoolInitials(school.name)}
+                    {school.logoUrl ? (
+                      <img src={school.logoUrl} alt="" className="w-full h-full object-cover" />
+                    ) : (
+                      schoolInitials(school.name)
+                    )}
                   </span>
                   <div className="min-w-0 flex-1">
                     <h2 className="text-sm font-bold text-primary leading-snug">{school.name}</h2>

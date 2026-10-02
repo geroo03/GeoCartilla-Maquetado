@@ -3,7 +3,10 @@ import type { School } from '../types/index.ts';
 import { useDemo } from '../store/demoStore.tsx';
 import { useShell } from '../App.tsx';
 import { computeOrderMetrics, isLive } from '../lib/metrics.ts';
-import { formatARS, formatDeliveryWindow, initials } from '../lib/format.ts';
+import { formatARS, formatDeliveryWindow } from '../lib/format.ts';
+import { autoSchoolColor, badgeInk, normalizeHex, schoolColor, schoolInitials } from '../lib/schoolColors.ts';
+import { SchoolBrandField } from './ui/SchoolBrandField.tsx';
+import { isSafeLogoDataUrl } from '../lib/image.ts';
 import { Icon } from './ui/Icon.tsx';
 import { EmptyState } from './ui/EmptyState.tsx';
 import { ModalShell } from './ui/ModalShell.tsx';
@@ -24,6 +27,8 @@ interface SchoolForm {
   weekday: string;
   time: string;
   divisions: string;
+  brandColor?: string;
+  logoUrl?: string;
 }
 
 const EMPTY_FORM: SchoolForm = {
@@ -34,6 +39,8 @@ const EMPTY_FORM: SchoolForm = {
   weekday: '5',
   time: '09:00',
   divisions: '1° Año, 2° Año, 3° Año',
+  brandColor: undefined,
+  logoUrl: undefined,
 };
 
 /** Próxima ocurrencia de un día de semana a una hora dada. */
@@ -98,6 +105,8 @@ export const SchoolsView: React.FC<{ searchQuery: string }> = ({ searchQuery }) 
       weekday: String(date.getDay()),
       time: `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`,
       divisions: school.divisions.join(', '),
+      brandColor: school.brandColor,
+      logoUrl: school.logoUrl,
     });
     setErrors({});
     setFormOpen(true);
@@ -141,6 +150,10 @@ export const SchoolsView: React.FC<{ searchQuery: string }> = ({ searchQuery }) 
       nextDelivery: formatDeliveryWindow(deliveryAt),
       nextDeliveryAt: deliveryAt,
       phone: form.phone.trim(),
+      // Lo que entra al estado se valida: el color puede venir escrito a mano
+      // y el logo tiene que ser una imagen embebida, no una URL remota.
+      brandColor: normalizeHex(form.brandColor) ?? undefined,
+      logoUrl: isSafeLogoDataUrl(form.logoUrl) ? form.logoUrl : undefined,
     };
 
     dispatch({ type: 'UPSERT_SCHOOL', school });
@@ -189,16 +202,30 @@ export const SchoolsView: React.FC<{ searchQuery: string }> = ({ searchQuery }) 
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {filtered.map((school) => {
             const { metrics, students } = statsFor(school.code);
+            // Misma insignia que en la agenda: el color se edita aca, asi que
+            // tiene que verse aca.
+            const color = schoolColor(state.schools, school.code);
 
             return (
               <article
                 key={school.id}
-                className="bg-surface-container-lowest rounded-xl shadow-xs border border-surface-container-high/60 flex flex-col overflow-hidden"
+                className="bg-surface-container-lowest rounded-xl shadow-xs border border-surface-container-high/60 border-l-4 flex flex-col overflow-hidden"
+                style={{ borderLeftColor: color }}
               >
                 <div className="p-4 flex flex-col gap-3">
                   <div className="flex items-start gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-primary-container text-on-primary flex items-center justify-center text-xs font-extrabold shrink-0">
-                      {initials(school.name.replace(/^(Col\.|Inst\.|Esc\.|Comercial)\s*/, ''))}
+                    <div
+                      className="w-10 h-10 rounded-lg flex items-center justify-center overflow-hidden text-xs font-extrabold shrink-0"
+                      style={{
+                        backgroundColor: school.logoUrl ? 'transparent' : color,
+                        color: badgeInk(color),
+                      }}
+                    >
+                      {school.logoUrl ? (
+                        <img src={school.logoUrl} alt="" className="w-full h-full object-cover" />
+                      ) : (
+                        schoolInitials(school.name)
+                      )}
                     </div>
                     <div className="min-w-0 flex-1">
                       <h2 className="text-sm font-bold text-primary leading-snug">{school.name}</h2>
@@ -420,6 +447,16 @@ export const SchoolsView: React.FC<{ searchQuery: string }> = ({ searchQuery }) 
               <span className="text-[10px] font-semibold text-error">{errors.divisions}</span>
             )}
           </label>
+
+          <SchoolBrandField
+            value={{ brandColor: form.brandColor, logoUrl: form.logoUrl }}
+            onChange={(next) => setForm({ ...form, ...next })}
+            autoColor={autoSchoolColor(
+              state.schools,
+              editingId ? state.schools.find((school) => school.id === editingId)?.code : undefined,
+            )}
+            initials={schoolInitials(form.name)}
+          />
         </form>
       </ModalShell>
 

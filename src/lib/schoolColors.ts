@@ -32,14 +32,41 @@ export const SCHOOL_PALETTE = [
 export const SCHOOL_FALLBACK = '#4b5563';
 
 /**
- * El color sigue al colegio, no a su posicion en una lista filtrada ni a su
- * ranking: se toma del orden de alta, que es estable y se persiste. Si se
- * ordenara la agenda por fecha, un colegio no puede cambiar de color.
+ * Normaliza un color escrito a mano: acepta #abc y #aabbcc, con o sin
+ * almohadilla, y devuelve null si no es un hex valido. Lo que llega de un
+ * input de texto o de un estado persistido no se pega al DOM sin revisar.
+ */
+export function normalizeHex(value: string | undefined | null): string | null {
+  if (!value) return null;
+  const raw = value.trim().replace(/^#/, '').toLowerCase();
+  if (/^[0-9a-f]{3}$/.test(raw)) {
+    return `#${raw[0]}${raw[0]}${raw[1]}${raw[1]}${raw[2]}${raw[2]}`;
+  }
+  if (/^[0-9a-f]{6}$/.test(raw)) return `#${raw}`;
+  return null;
+}
+
+/**
+ * Color de un colegio. Manda el elegido a mano; si no hay, se toma el de la
+ * paleta por orden de alta, que es estable y se persiste: si la agenda se
+ * ordena por fecha, un colegio no puede cambiar de color.
  */
 export function schoolColor(schools: School[], code: string): string {
   const index = schools.findIndex((school) => school.code === code);
   if (index < 0) return SCHOOL_FALLBACK;
+  const chosen = normalizeHex(schools[index].brandColor);
+  if (chosen) return chosen;
   return SCHOOL_PALETTE[index] ?? SCHOOL_FALLBACK;
+}
+
+/**
+ * El color que le tocaria a un colegio por paleta, ignorando el elegido a
+ * mano. Es lo que muestra la opcion "Automatico" del formulario. Un colegio
+ * que todavia no existe toma el siguiente libre.
+ */
+export function autoSchoolColor(schools: School[], code?: string): string {
+  const index = code ? schools.findIndex((school) => school.code === code) : -1;
+  return SCHOOL_PALETTE[index < 0 ? schools.length : index] ?? SCHOOL_FALLBACK;
 }
 
 /** Tinta oscura para las insignias claras: el navy de la marca es muy azul

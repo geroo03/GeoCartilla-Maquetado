@@ -3,8 +3,10 @@ import assert from 'node:assert/strict';
 import {
   SCHOOL_FALLBACK,
   SCHOOL_PALETTE,
+  autoSchoolColor,
   badgeInk,
   contrastRatio,
+  normalizeHex,
   schoolColor,
   schoolInitials,
 } from './schoolColors.ts';
@@ -57,4 +59,43 @@ test('el blanco no sirve para todos: cian y ambar piden tinta oscura', () => {
   assert.notEqual(badgeInk('#d97706'), '#ffffff');
   assert.equal(badgeInk('#7e22ce'), '#ffffff');
   assert.equal(badgeInk('#3f6212'), '#ffffff');
+});
+
+test('normalizeHex acepta lo que una persona escribe a mano', () => {
+  assert.equal(normalizeHex('#0891B2'), '#0891b2');
+  assert.equal(normalizeHex('0891b2'), '#0891b2');
+  assert.equal(normalizeHex('#abc'), '#aabbcc');
+  assert.equal(normalizeHex('  #D97706  '), '#d97706');
+});
+
+test('normalizeHex rechaza lo que no es un color', () => {
+  // Nada de esto puede terminar en un atributo style.
+  assert.equal(normalizeHex('rojo'), null);
+  assert.equal(normalizeHex('javascript:alert(1)'), null);
+  assert.equal(normalizeHex('#12345'), null);
+  assert.equal(normalizeHex(''), null);
+  assert.equal(normalizeHex(undefined), null);
+});
+
+test('el color elegido a mano le gana al de la paleta', () => {
+  const pintado = SCHOOLS.map((school) =>
+    school.code === SCHOOLS[1].code ? { ...school, brandColor: '#123456' } : school,
+  );
+  assert.equal(schoolColor(pintado, SCHOOLS[1].code), '#123456');
+  // Y no le mueve el color a nadie mas.
+  assert.equal(schoolColor(pintado, SCHOOLS[0].code), SCHOOL_PALETTE[0]);
+});
+
+test('un brandColor invalido no se usa: se vuelve a la paleta', () => {
+  const roto = SCHOOLS.map((school) =>
+    school.code === SCHOOLS[2].code ? { ...school, brandColor: 'url(javascript:0)' } : school,
+  );
+  assert.equal(schoolColor(roto, SCHOOLS[2].code), SCHOOL_PALETTE[2]);
+});
+
+test('autoSchoolColor ignora el color elegido y da el de la paleta', () => {
+  const pintado = SCHOOLS.map((school) => ({ ...school, brandColor: '#000000' }));
+  assert.equal(autoSchoolColor(pintado, SCHOOLS[3].code), SCHOOL_PALETTE[3]);
+  // Un colegio nuevo toma el siguiente libre.
+  assert.equal(autoSchoolColor(SCHOOLS.slice(0, 2)), SCHOOL_PALETTE[2]);
 });

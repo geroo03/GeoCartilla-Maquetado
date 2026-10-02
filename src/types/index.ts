@@ -82,6 +82,10 @@ export interface School {
   /** Timestamp de la próxima ventana de retiro, para ordenar la agenda. */
   nextDeliveryAt: number;
   phone: string;
+  /** Color de identidad elegido a mano. Sin esto se usa el de la paleta. */
+  brandColor?: string;
+  /** Logo del colegio como data URL, ya achicado antes de guardarse. */
+  logoUrl?: string;
 }
 
 /** Alumno con sesión abierta en el portal. */
