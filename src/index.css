@@ -129,6 +129,109 @@ body {
 }
 
 /*
+ * Bienvenida del docente al iniciar sesion. Se arma con keyframes propios y
+ * no con las clases animate-in/fade-in que hay repartidas por el maquetado:
+ * esas vienen de un plugin que nunca se instalo, asi que no emiten CSS.
+ */
+@keyframes welcome-veil-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes welcome-veil-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes welcome-mark {
+  0% {
+    opacity: 0;
+    transform: scale(0.7) translateY(12px);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(1.05) translateY(0);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes welcome-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+    filter: blur(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+}
+
+@keyframes welcome-sweep {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+.welcome-veil {
+  animation: welcome-veil-in 220ms ease-out both;
+}
+
+.welcome-veil[data-leaving='true'] {
+  animation: welcome-veil-out 420ms ease-in both;
+}
+
+.welcome-mark {
+  animation: welcome-mark 620ms cubic-bezier(0.2, 0.8, 0.2, 1) 80ms both;
+}
+
+.welcome-eyebrow {
+  animation: welcome-rise 520ms cubic-bezier(0.2, 0.8, 0.2, 1) 300ms both;
+}
+
+.welcome-name {
+  animation: welcome-rise 560ms cubic-bezier(0.2, 0.8, 0.2, 1) 420ms both;
+}
+
+.welcome-rule {
+  transform-origin: center;
+  animation: welcome-sweep 620ms cubic-bezier(0.2, 0.8, 0.2, 1) 620ms both;
+}
+
+.welcome-stats {
+  animation: welcome-rise 520ms cubic-bezier(0.2, 0.8, 0.2, 1) 780ms both;
+}
+
+/* Sin movimiento ni desenfoque para quien pidio reducir animaciones. */
+@media (prefers-reduced-motion: reduce) {
+  .welcome-mark,
+  .welcome-eyebrow,
+  .welcome-name,
+  .welcome-stats {
+    animation: welcome-veil-in 200ms ease-out both;
+  }
+
+  .welcome-rule {
+    animation: none;
+  }
+}
+
+/*
  * Impresion: el maquetado original llamaba a window.print() pero no marcaba
  * nada, asi que salia toda la app (sidebar, header y toasts incluidos).
  * Ahora se oculta todo y solo se revela el contenedor .print-root, usando

@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import type { Order } from './types/index.ts';
 import { DemoProvider, useDemo } from './store/demoStore.tsx';
-import { notificationsFor, unreadCount } from './lib/metrics.ts';
+import { computeOrderMetrics, notificationsFor, unreadCount } from './lib/metrics.ts';
 import { HeaderTeacher } from './components/HeaderTeacher.tsx';
 import { SidebarTeacher, type TeacherTab } from './components/SidebarTeacher.tsx';
 import { DashboardView } from './components/DashboardView.tsx';
@@ -16,6 +16,7 @@ import { PrintSheetModal } from './components/PrintSheetModal.tsx';
 import { LoginTeacher } from './components/LoginTeacher.tsx';
 import { StudentPortal } from './components/StudentPortal.tsx';
 import { DemoGuide } from './components/DemoGuide.tsx';
+import { WelcomeOverlay } from './components/WelcomeOverlay.tsx';
 import { ToastStack } from './components/ui/ToastStack.tsx';
 import { Icon } from './components/ui/Icon.tsx';
 
@@ -87,6 +88,10 @@ function AppShell() {
   const [appMode, setAppMode] = useState<AppMode>('teacher');
   const [teacherTab, setTeacherTab] = useState<TeacherTab>('resumen');
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  // Guarda el nombre a saludar, no un booleano "ya inicio sesion": la sesion
+  // queda en localStorage, asi que atarlo al estado haria que la bienvenida
+  // se repitiera en cada refresh.
+  const [welcomeName, setWelcomeName] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
   const [orderForDrawer, setOrderForDrawer] = useState<Order | null>(null);
@@ -105,6 +110,12 @@ function AppShell() {
   const teacherNotifications = useMemo(
     () => notificationsFor(state.notifications, 'docente'),
     [state.notifications],
+  );
+
+  // Solo hace falta cuando la bienvenida esta en pantalla.
+  const welcomeMetrics = useMemo(
+    () => (welcomeName ? computeOrderMetrics(state.orders) : null),
+    [welcomeName, state.orders],
   );
 
   // Al cambiar de pestaña el buscador global arranca limpio.
@@ -160,9 +171,21 @@ function AppShell() {
           />
         )}
 
+        {welcomeName && welcomeMetrics && (
+          <WelcomeOverlay
+            name={welcomeName}
+            readyCount={welcomeMetrics.readyCount}
+            pendingCount={welcomeMetrics.pendingCount}
+            onDone={() => setWelcomeName(null)}
+          />
+        )}
+
         {showTeacherLogin && (
           <LoginTeacher
-            onLogin={(session) => dispatch({ type: 'LOGIN_TEACHER', session })}
+            onLogin={(session) => {
+              dispatch({ type: 'LOGIN_TEACHER', session });
+              setWelcomeName(session.name);
+            }}
             onPreviewStudent={() => setAppMode('student')}
           />
         )}
