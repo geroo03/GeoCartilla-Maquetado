@@ -40,9 +40,20 @@ export function useShell(): ShellActions {
 }
 
 /** Barra flotante para alternar entre las dos vistas de la demo. */
-function ViewSwitcher({ mode, onChange }: { mode: AppMode; onChange: (mode: AppMode) => void }) {
+function ViewSwitcher({
+  mode,
+  onChange,
+  raised,
+}: {
+  mode: AppMode;
+  onChange: (mode: AppMode) => void;
+  /** El portal del alumno tiene barra inferior: los flotantes van por encima. */
+  raised: boolean;
+}) {
   return (
-    <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 bg-primary-container/95 text-white backdrop-blur-md px-3 py-1.5 rounded-full shadow-2xl border border-primary-fixed/30 flex items-center gap-2 text-xs no-print">
+    <div
+      className={`fixed ${raised ? 'bottom-20 sm:bottom-4' : 'bottom-4'} left-1/2 -translate-x-1/2 z-50 bg-primary-container/95 text-white backdrop-blur-md px-3 py-1.5 rounded-full shadow-2xl border border-primary-fixed/30 flex items-center gap-2 text-xs no-print`}
+    >
       <span className="text-[11px] font-semibold text-on-primary-container px-2 hidden sm:inline">
         Vista actual:
       </span>
@@ -134,8 +145,17 @@ function AppShell() {
           </div>
         )}
 
-        {!showTeacherLogin && <ViewSwitcher mode={appMode} onChange={setAppMode} />}
-        {!showTeacherLogin && <DemoGuide mode={appMode} onSwitchMode={setAppMode} onGoToTab={setTeacherTab} />}
+        {!showTeacherLogin && (
+          <ViewSwitcher mode={appMode} onChange={setAppMode} raised={appMode === 'student'} />
+        )}
+        {!showTeacherLogin && (
+          <DemoGuide
+            mode={appMode}
+            onSwitchMode={setAppMode}
+            onGoToTab={setTeacherTab}
+            raised={appMode === 'student'}
+          />
+        )}
 
         {showTeacherLogin && (
           <LoginTeacher
