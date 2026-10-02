@@ -57,7 +57,14 @@ export const StudentPortal: React.FC<{ onSwitchToTeacher: () => void }> = ({ onS
     }
   }, [student]);
 
-  const shell = (children: React.ReactNode, title: string) => (
+  /** Vuelve al catálogo desde cualquier sub-pantalla. */
+  const backToCatalog = () => {
+    setConfirmedOrder(null);
+    setSelectedCartilla(null);
+    setActiveTab('catalogo');
+  };
+
+  const shell = (children: React.ReactNode, title: string, onBack?: () => void) => (
     <div
       className={
         // Deja aire abajo para la barra de navegación (60px) y, en pantallas
@@ -68,9 +75,20 @@ export const StudentPortal: React.FC<{ onSwitchToTeacher: () => void }> = ({ onS
     >
       <header className="sticky top-0 w-full z-40 bg-surface/90 backdrop-blur-md border-b border-surface-container-high/50 px-4 py-2.5 flex items-center justify-between gap-2 no-print">
         <div className="flex items-center gap-2.5 min-w-0">
-          <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center shrink-0 p-1">
-            <BrandMark />
-          </div>
+          {onBack ? (
+            <button
+              onClick={onBack}
+              className="w-8 h-8 rounded-lg flex items-center justify-center text-primary hover:bg-surface-container transition-colors shrink-0 focus-visible:outline-2 focus-visible:outline-primary"
+              type="button"
+              aria-label="Volver"
+            >
+              <Icon name="arrow_back" size={22} />
+            </button>
+          ) : (
+            <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center shrink-0 p-1">
+              <BrandMark />
+            </div>
+          )}
           <div className="flex flex-col min-w-0">
             <span className="text-[10px] font-bold text-secondary uppercase tracking-wider leading-none">
               GeoCartillas
@@ -117,11 +135,16 @@ export const StudentPortal: React.FC<{ onSwitchToTeacher: () => void }> = ({ onS
         >
           <div className="flex justify-around items-center h-15 px-2">
             {NAV.map((item) => {
-              const isActive = activeTab === item.id;
+              const isActive = !confirmedOrder && activeTab === item.id;
               return (
                 <button
                   key={item.id}
-                  onClick={() => setActiveTab(item.id)}
+                  onClick={() => {
+                    // Salir de la pantalla de confirmación: si no, la barra se
+                    // ve pero no navega a ningún lado.
+                    setConfirmedOrder(null);
+                    setActiveTab(item.id);
+                  }}
                   aria-current={isActive ? 'page' : undefined}
                   className={`flex flex-col items-center justify-center min-w-[60px] py-1 cursor-pointer transition-colors rounded focus-visible:outline-2 focus-visible:outline-primary ${
                     isActive ? 'text-primary-container font-bold' : 'text-on-surface-variant hover:text-on-surface'
@@ -212,6 +235,15 @@ export const StudentPortal: React.FC<{ onSwitchToTeacher: () => void }> = ({ onS
           >
             Ver en Mis Pedidos
           </button>
+
+          <button
+            onClick={backToCatalog}
+            className="w-full h-10 text-primary rounded-xl font-bold text-xs hover:bg-surface-container transition-colors flex items-center justify-center gap-1.5 cursor-pointer focus-visible:outline-2 focus-visible:outline-primary"
+            type="button"
+          >
+            <Icon name="menu_book" size={16} />
+            Seguir viendo cartillas
+          </button>
         </div>
 
         <OrderReceipt
@@ -221,6 +253,7 @@ export const StudentPortal: React.FC<{ onSwitchToTeacher: () => void }> = ({ onS
         />
       </div>,
       'Pedido confirmado',
+      backToCatalog,
     );
   }
 
@@ -259,5 +292,6 @@ export const StudentPortal: React.FC<{ onSwitchToTeacher: () => void }> = ({ onS
       )}
     </>,
     TAB_TITLES[activeTab],
+    activeTab === 'mi-pedido' ? () => setActiveTab('catalogo') : undefined,
   );
 };
