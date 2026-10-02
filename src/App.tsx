@@ -1,296 +1,234 @@
-import React, { useState } from 'react';
-import { Cartilla, Order, School } from './types/index.ts';
-import {
-  INITIAL_CARTILLAS,
-  INITIAL_ORDERS,
-  INITIAL_SCHOOLS,
-} from './data/mockData.ts';
+import React, { useEffect, useMemo, useState } from 'react';
+import type { Order } from './types/index.ts';
+import { DemoProvider, useDemo } from './store/demoStore.tsx';
+import { notificationsFor, unreadCount } from './lib/metrics.ts';
 import { HeaderTeacher } from './components/HeaderTeacher.tsx';
-import { SidebarTeacher } from './components/SidebarTeacher.tsx';
+import { SidebarTeacher, type TeacherTab } from './components/SidebarTeacher.tsx';
+import { DashboardView } from './components/DashboardView.tsx';
 import { OrdersView } from './components/OrdersView.tsx';
 import { BookletsView } from './components/BookletsView.tsx';
 import { SchoolsView } from './components/SchoolsView.tsx';
+import { DeliveriesView } from './components/DeliveriesView.tsx';
 import { OrderDetailDrawer } from './components/OrderDetailDrawer.tsx';
 import { ConfirmDeliveryModal } from './components/ConfirmDeliveryModal.tsx';
 import { ManualOrderModal } from './components/ManualOrderModal.tsx';
 import { PrintSheetModal } from './components/PrintSheetModal.tsx';
+import { LoginTeacher } from './components/LoginTeacher.tsx';
 import { StudentPortal } from './components/StudentPortal.tsx';
+import { DemoGuide } from './components/DemoGuide.tsx';
+import { ToastStack } from './components/ui/ToastStack.tsx';
+import { Icon } from './components/ui/Icon.tsx';
 
-export default function App() {
-  // Main mode: 'teacher' or 'student'
-  const [appMode, setAppMode] = useState<'teacher' | 'student'>('teacher');
+export type AppMode = 'teacher' | 'student';
 
-  // Teacher navigation: 'pedidos' | 'cartillas' | 'colegios'
-  const [teacherTab, setTeacherTab] = useState<'pedidos' | 'cartillas' | 'colegios'>('pedidos');
+/** Contexto ligero para que las vistas abran modales sin prop drilling. */
+interface ShellActions {
+  openOrder: (order: Order) => void;
+  confirmDelivery: (order: Order) => void;
+  openManualOrder: () => void;
+  openPrintSheet: (schoolCode?: string) => void;
+  goToTab: (tab: TeacherTab) => void;
+  switchMode: (mode: AppMode) => void;
+}
+
+const ShellContext = React.createContext<ShellActions | null>(null);
+
+export function useShell(): ShellActions {
+  const ctx = React.useContext(ShellContext);
+  if (!ctx) throw new Error('useShell debe usarse dentro de <App>');
+  return ctx;
+}
+
+/** Barra flotante para alternar entre las dos vistas de la demo. */
+function ViewSwitcher({ mode, onChange }: { mode: AppMode; onChange: (mode: AppMode) => void }) {
+  return (
+    <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 bg-primary-container/95 text-white backdrop-blur-md px-3 py-1.5 rounded-full shadow-2xl border border-primary-fixed/30 flex items-center gap-2 text-xs no-print">
+      <span className="text-[11px] font-semibold text-on-primary-container px-2 hidden sm:inline">
+        Vista actual:
+      </span>
+      {(
+        [
+          { id: 'teacher' as const, label: 'Panel Docente', icon: 'desktop_windows' },
+          { id: 'student' as const, label: 'Portal Alumno', icon: 'smartphone' },
+        ]
+      ).map((option) => (
+        <button
+          key={option.id}
+          onClick={() => onChange(option.id)}
+          className={`px-3 py-1 rounded-full font-bold transition-all flex items-center gap-1.5 cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-secondary-fixed-dim ${
+            mode === option.id
+              ? option.id === 'student'
+                ? 'bg-secondary text-on-secondary shadow-sm'
+                : 'bg-white text-primary shadow-sm'
+              : 'text-on-primary-container hover:text-white'
+          }`}
+          type="button"
+          aria-pressed={mode === option.id}
+        >
+          <Icon name={option.icon} size={16} />
+          <span>{option.label}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function AppShell() {
+  const { state, dispatch, persistenceBlocked } = useDemo();
+
+  const [appMode, setAppMode] = useState<AppMode>('teacher');
+  const [teacherTab, setTeacherTab] = useState<TeacherTab>('resumen');
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-
-  // Global state for live data reactivity
-  const [cartillas, setCartillas] = useState<Cartilla[]>(INITIAL_CARTILLAS);
-  const [orders, setOrders] = useState<Order[]>(INITIAL_ORDERS);
-  const [schools, setSchools] = useState<School[]>(INITIAL_SCHOOLS);
-
-  // Search query in teacher header
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Modals & Drawer state
-  const [selectedOrderForDrawer, setSelectedOrderForDrawer] = useState<Order | null>(null);
-  const [selectedOrderForConfirm, setSelectedOrderForConfirm] = useState<Order | null>(null);
+  const [orderForDrawer, setOrderForDrawer] = useState<Order | null>(null);
+  const [orderForConfirm, setOrderForConfirm] = useState<Order | null>(null);
   const [isManualOrderOpen, setIsManualOrderOpen] = useState(false);
+  const [printSheetSchool, setPrintSheetSchool] = useState<string | null>(null);
   const [isPrintSheetOpen, setIsPrintSheetOpen] = useState(false);
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  const showToast = (msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => {
-      setToastMessage(null);
-    }, 3200);
-  };
+  // El drawer refleja la versión viva del pedido: si se cobra o entrega desde
+  // adentro, el panel se actualiza sin cerrarse.
+  const liveOrderForDrawer = useMemo(
+    () => (orderForDrawer ? state.orders.find((o) => o.id === orderForDrawer.id) ?? null : null),
+    [orderForDrawer, state.orders],
+  );
 
-  // Handlers for orders
-  const handleMarkPaid = (orderId: string) => {
-    setOrders((prev) =>
-      prev.map((o) =>
-        o.id === orderId
-          ? {
-              ...o,
-              paymentStatus: 'Pagado',
-              deliveryStatus: o.deliveryStatus === 'Preparado' ? 'Listo para retirar' : o.deliveryStatus,
-            }
-          : o
-      )
-    );
-    if (selectedOrderForDrawer && selectedOrderForDrawer.id === orderId) {
-      setSelectedOrderForDrawer((prev) =>
-        prev
-          ? {
-              ...prev,
-              paymentStatus: 'Pagado',
-              deliveryStatus: prev.deliveryStatus === 'Preparado' ? 'Listo para retirar' : prev.deliveryStatus,
-            }
-          : null
-      );
-    }
-    showToast('¡Pago de $8.000 ARS registrado y conciliado!');
-  };
+  const teacherNotifications = useMemo(
+    () => notificationsFor(state.notifications, 'docente'),
+    [state.notifications],
+  );
 
-  const handleDeliver = (orderId: string) => {
-    setOrders((prev) =>
-      prev.map((o) =>
-        o.id === orderId
-          ? {
-              ...o,
-              deliveryStatus: 'Entregado',
-              paymentStatus: 'Pagado',
-            }
-          : o
-      )
-    );
-    if (selectedOrderForDrawer && selectedOrderForDrawer.id === orderId) {
-      setSelectedOrderForDrawer((prev) =>
-        prev
-          ? {
-              ...prev,
-              deliveryStatus: 'Entregado',
-              paymentStatus: 'Pagado',
-            }
-          : null
-      );
-    }
-    showToast('¡Cartilla entregada con éxito en Sala de Profesores!');
-  };
+  // Al cambiar de pestaña el buscador global arranca limpio.
+  useEffect(() => {
+    setSearchQuery('');
+  }, [teacherTab]);
 
-  const handleBulkDeliver = (orderIds: string[]) => {
-    setOrders((prev) =>
-      prev.map((o) =>
-        orderIds.includes(o.id)
-          ? {
-              ...o,
-              deliveryStatus: 'Entregado',
-              paymentStatus: 'Pagado',
-            }
-          : o
-      )
-    );
-    showToast(`¡${orderIds.length} cartillas marcadas como entregadas!`);
-  };
+  const actions = useMemo<ShellActions>(
+    () => ({
+      openOrder: (order) => setOrderForDrawer(order),
+      confirmDelivery: (order) => setOrderForConfirm(order),
+      openManualOrder: () => setIsManualOrderOpen(true),
+      openPrintSheet: (schoolCode) => {
+        setPrintSheetSchool(schoolCode ?? null);
+        setIsPrintSheetOpen(true);
+      },
+      goToTab: (tab) => setTeacherTab(tab),
+      switchMode: (mode) => setAppMode(mode),
+    }),
+    [],
+  );
 
-  const handleAddOrder = (newOrder: Order) => {
-    setOrders((prev) => [newOrder, ...prev]);
-    showToast(`Nuevo pedido ${newOrder.code} registrado para ${newOrder.studentName}`);
-  };
-
-  // Handlers for cartillas
-  const handleToggleCartillaActive = (id: string) => {
-    setCartillas((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, isActive: !c.isActive } : c))
-    );
-    showToast('Visibilidad de la cartilla actualizada');
-  };
-
-  const handleAddCartilla = (newCartilla: Cartilla) => {
-    setCartillas((prev) => [newCartilla, ...prev]);
-    showToast(`Cartilla "${newCartilla.title}" agregada al catálogo.`);
-  };
-
-  const handleAddSchool = (newSchool: School) => {
-    setSchools((prev) => [...prev, newSchool]);
-    showToast(`Colegio "${newSchool.name}" adscripto.`);
-  };
+  const showTeacherLogin = appMode === 'teacher' && !state.teacher;
 
   return (
-    <div className="min-h-screen bg-background font-sans text-on-surface antialiased">
-      {/* Toast Notification */}
-      {toastMessage && (
-        <div className="fixed bottom-6 right-6 z-50 bg-primary text-on-primary px-4 py-3 rounded-xl shadow-xl flex items-center gap-3 border border-secondary text-xs font-semibold animate-in slide-in-from-bottom duration-200">
-          <span className="material-symbols-outlined text-secondary text-[20px]">check_circle</span>
-          <span>{toastMessage}</span>
-          <button
-            onClick={() => setToastMessage(null)}
-            className="ml-2 text-outline-variant hover:text-white"
-          >
-            ✕
-          </button>
-        </div>
-      )}
+    <ShellContext.Provider value={actions}>
+      <div className="min-h-screen bg-background font-sans text-on-surface antialiased">
+        <ToastStack />
 
-      {/* Floating View Switcher Bar (Quickly toggle between Teacher Desktop & Student Mobile) */}
-      <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 bg-primary-container/95 text-white backdrop-blur-md px-3 py-1.5 rounded-full shadow-2xl border border-primary-fixed/30 flex items-center gap-2 text-xs">
-        <span className="text-[11px] font-semibold text-on-primary-container px-2 hidden sm:inline">
-          Vista actual:
-        </span>
-        <button
-          onClick={() => setAppMode('teacher')}
-          className={`px-3 py-1 rounded-full font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-            appMode === 'teacher'
-              ? 'bg-white text-primary shadow-sm'
-              : 'text-on-primary-container hover:text-white'
-          }`}
-          type="button"
-        >
-          <span className="material-symbols-outlined text-[16px]">desktop_windows</span>
-          <span>Panel Docente</span>
-        </button>
-
-        <button
-          onClick={() => setAppMode('student')}
-          className={`px-3 py-1 rounded-full font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-            appMode === 'student'
-              ? 'bg-secondary text-on-secondary shadow-sm'
-              : 'text-on-primary-container hover:text-white'
-          }`}
-          type="button"
-        >
-          <span className="material-symbols-outlined text-[16px]">smartphone</span>
-          <span>Portal Alumno</span>
-        </button>
-      </div>
-
-      {/* VIEW A: TEACHER DASHBOARD */}
-      {appMode === 'teacher' && (
-        <div className="flex min-h-screen">
-          {/* Mobile hamburger menu toggle */}
-          <div className="lg:hidden fixed top-4 left-4 z-50">
-            <button
-              onClick={() => setMobileSidebarOpen(true)}
-              className="p-2 rounded-lg bg-surface-container-lowest text-primary shadow-sm border border-surface-container-high"
-              type="button"
-              aria-label="Abrir menú docente"
-            >
-              <span className="material-symbols-outlined text-[24px]">menu</span>
-            </button>
+        {persistenceBlocked && (
+          <div className="fixed top-0 inset-x-0 z-[70] bg-tertiary-container text-on-tertiary-container px-4 py-2 text-[11px] font-semibold flex items-center justify-center gap-2 no-print">
+            <Icon name="warning" size={16} />
+            No se puede guardar en este navegador (ventana privada o cookies bloqueadas): los cambios se
+            pierden al refrescar.
           </div>
+        )}
 
-          {/* Desktop & Mobile Sidebar */}
-          <SidebarTeacher
-            activeTab={teacherTab}
-            onTabChange={(tab) => setTeacherTab(tab)}
-            ordersCount={orders.length}
-            onSwitchToStudent={() => setAppMode('student')}
-            mobileMenuOpen={mobileSidebarOpen}
-            onCloseMobileMenu={() => setMobileSidebarOpen(false)}
+        {!showTeacherLogin && <ViewSwitcher mode={appMode} onChange={setAppMode} />}
+        {!showTeacherLogin && <DemoGuide mode={appMode} onSwitchMode={setAppMode} onGoToTab={setTeacherTab} />}
+
+        {showTeacherLogin && (
+          <LoginTeacher
+            onLogin={(session) => dispatch({ type: 'LOGIN_TEACHER', session })}
+            onPreviewStudent={() => setAppMode('student')}
           />
+        )}
 
-          {/* Main Content Area */}
-          <div className="flex-1 lg:pl-72 flex flex-col min-h-screen">
-            <HeaderTeacher
-              searchQuery={searchQuery}
-              onSearchChange={setSearchQuery}
-              onOpenNotifications={() =>
-                showToast('Notificación: La remesa #41 de Geografía 5° llega el jueves a las 09:30 hs.')
-              }
+        {appMode === 'teacher' && state.teacher && (
+          <div className="flex min-h-screen">
+            <div className="lg:hidden fixed top-4 left-4 z-40 no-print">
+              <button
+                onClick={() => setMobileSidebarOpen(true)}
+                className="p-2 rounded-lg bg-surface-container-lowest text-primary shadow-sm border border-surface-container-high focus-visible:outline-2 focus-visible:outline-primary"
+                type="button"
+                aria-label="Abrir menú docente"
+              >
+                <Icon name="menu" size={24} />
+              </button>
+            </div>
+
+            <SidebarTeacher
               activeTab={teacherTab}
+              onTabChange={setTeacherTab}
+              mobileMenuOpen={mobileSidebarOpen}
+              onCloseMobileMenu={() => setMobileSidebarOpen(false)}
+              onSwitchToStudent={() => setAppMode('student')}
             />
 
-            <main className="relative pt-24 px-4 sm:px-6 lg:px-8 pb-20 bg-background flex-1 w-full">
-              {teacherTab === 'pedidos' && (
-                <OrdersView
-                  orders={orders}
-                  onSelectOrder={(order) => setSelectedOrderForDrawer(order)}
-                  onOpenConfirmDelivery={(order) => setSelectedOrderForConfirm(order)}
-                  onOpenManualOrder={() => setIsManualOrderOpen(true)}
-                  onOpenPrintSheet={() => setIsPrintSheetOpen(true)}
-                  onBulkDeliver={handleBulkDeliver}
-                  searchQuery={searchQuery}
-                />
-              )}
+            <div className="flex-1 lg:pl-72 flex flex-col min-h-screen">
+              <HeaderTeacher
+                searchQuery={searchQuery}
+                onSearchChange={setSearchQuery}
+                activeTab={teacherTab}
+                notifications={teacherNotifications}
+                unread={unreadCount(teacherNotifications)}
+                onOpenOrder={(orderId) => {
+                  const order = state.orders.find((o) => o.id === orderId);
+                  if (order) {
+                    setTeacherTab('pedidos');
+                    setOrderForDrawer(order);
+                  }
+                }}
+              />
 
-              {teacherTab === 'cartillas' && (
-                <BookletsView
-                  cartillas={cartillas}
-                  schools={schools}
-                  onToggleActive={handleToggleCartillaActive}
-                  onAddCartilla={handleAddCartilla}
-                />
-              )}
+              <main className="relative pt-24 px-4 sm:px-6 lg:px-8 pb-24 bg-background flex-1 w-full">
+                {teacherTab === 'resumen' && <DashboardView />}
+                {teacherTab === 'pedidos' && <OrdersView searchQuery={searchQuery} />}
+                {teacherTab === 'cartillas' && <BookletsView searchQuery={searchQuery} />}
+                {teacherTab === 'colegios' && <SchoolsView searchQuery={searchQuery} />}
+                {teacherTab === 'entregas' && <DeliveriesView />}
+              </main>
+            </div>
 
-              {teacherTab === 'colegios' && (
-                <SchoolsView schools={schools} onAddSchool={handleAddSchool} />
-              )}
-            </main>
+            <OrderDetailDrawer
+              order={liveOrderForDrawer}
+              isOpen={!!liveOrderForDrawer}
+              onClose={() => setOrderForDrawer(null)}
+            />
+
+            <ConfirmDeliveryModal
+              order={orderForConfirm}
+              isOpen={!!orderForConfirm}
+              onClose={() => setOrderForConfirm(null)}
+            />
+
+            <ManualOrderModal
+              isOpen={isManualOrderOpen}
+              onClose={() => setIsManualOrderOpen(false)}
+            />
+
+            <PrintSheetModal
+              isOpen={isPrintSheetOpen}
+              onClose={() => setIsPrintSheetOpen(false)}
+              schoolCode={printSheetSchool}
+            />
           </div>
+        )}
 
-          {/* Modals and Drawer */}
-          <OrderDetailDrawer
-            order={selectedOrderForDrawer}
-            isOpen={!!selectedOrderForDrawer}
-            onClose={() => setSelectedOrderForDrawer(null)}
-            onMarkPaid={handleMarkPaid}
-            onDeliver={handleDeliver}
-          />
+        {appMode === 'student' && (
+          <div className="min-h-screen bg-surface-container-low/60 flex items-center justify-center p-0 sm:py-6">
+            <StudentPortal onSwitchToTeacher={() => setAppMode('teacher')} />
+          </div>
+        )}
+      </div>
+    </ShellContext.Provider>
+  );
+}
 
-          <ConfirmDeliveryModal
-            order={selectedOrderForConfirm}
-            isOpen={!!selectedOrderForConfirm}
-            onClose={() => setSelectedOrderForConfirm(null)}
-            onConfirm={handleDeliver}
-          />
-
-          <ManualOrderModal
-            isOpen={isManualOrderOpen}
-            onClose={() => setIsManualOrderOpen(false)}
-            cartillas={cartillas}
-            onAddOrder={handleAddOrder}
-          />
-
-          <PrintSheetModal
-            isOpen={isPrintSheetOpen}
-            onClose={() => setIsPrintSheetOpen(false)}
-            orders={orders}
-          />
-        </div>
-      )}
-
-      {/* VIEW B: STUDENT PORTAL (MOBILE-OPTIMIZED INTERFACE) */}
-      {appMode === 'student' && (
-        <div className="min-h-screen bg-surface-container-low/60 flex items-center justify-center p-0 sm:py-6">
-          <StudentPortal
-            cartillas={cartillas}
-            orders={orders}
-            onPlaceOrder={handleAddOrder}
-            onSwitchToTeacher={() => setAppMode('teacher')}
-          />
-        </div>
-      )}
-    </div>
+export default function App() {
+  return (
+    <DemoProvider>
+      <AppShell />
+    </DemoProvider>
   );
 }

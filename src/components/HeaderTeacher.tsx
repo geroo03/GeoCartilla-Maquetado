@@ -1,98 +1,131 @@
-import React from 'react';
-import { TEACHER_PROFILE } from '../data/mockData.ts';
+import React, { useState } from 'react';
+import type { Notification } from '../types/index.ts';
+import { useDemo } from '../store/demoStore.tsx';
+import { initials } from '../lib/format.ts';
+import { Icon } from './ui/Icon.tsx';
+import { NotificationsPanel } from './NotificationsPanel.tsx';
+import type { TeacherTab } from './SidebarTeacher.tsx';
+
+/** Título y placeholder de búsqueda según la pestaña activa. */
+const TAB_META: Record<TeacherTab, { title: string; searchPlaceholder: string }> = {
+  resumen: {
+    title: 'Resumen del ciclo',
+    searchPlaceholder: 'Buscar en el resumen...',
+  },
+  pedidos: {
+    title: 'Pedidos',
+    searchPlaceholder: 'Buscar por alumno, DNI, código o cartilla...',
+  },
+  entregas: {
+    title: 'Entregas',
+    searchPlaceholder: 'Buscar colegio o alumno...',
+  },
+  cartillas: {
+    title: 'Cartillas',
+    searchPlaceholder: 'Buscar por título, código o colegio...',
+  },
+  colegios: {
+    title: 'Colegios',
+    searchPlaceholder: 'Buscar por nombre, dirección o coordinador...',
+  },
+};
 
 interface HeaderTeacherProps {
   searchQuery: string;
-  onSearchChange: (q: string) => void;
-  onOpenNotifications?: () => void;
-  activeTab: string;
+  onSearchChange: (query: string) => void;
+  activeTab: TeacherTab;
+  notifications: Notification[];
+  unread: number;
+  onOpenOrder?: (orderId: string) => void;
 }
 
 export const HeaderTeacher: React.FC<HeaderTeacherProps> = ({
   searchQuery,
   onSearchChange,
-  onOpenNotifications,
   activeTab,
+  notifications,
+  unread,
+  onOpenOrder,
 }) => {
+  const { state } = useDemo();
+  const [showNotifications, setShowNotifications] = useState(false);
+  const teacher = state.teacher;
+  const meta = TAB_META[activeTab];
+
   return (
-    <header className="fixed top-0 left-0 lg:left-72 right-0 h-20 bg-surface/90 backdrop-blur-xl shadow-[0_1px_8px_rgba(0,0,0,0.04)] z-40 flex items-center justify-between px-4 sm:px-6 transition-all duration-200">
-      <div className="flex items-center gap-3 sm:gap-6 flex-1 min-w-0">
-        <div className="hidden sm:flex items-center gap-1.5 text-on-surface-variant shrink-0">
-          <span className="text-xs text-outline font-medium">Panel</span>
-          <span className="material-symbols-outlined text-[16px] text-outline-variant">chevron_right</span>
-          <span className="text-xs font-semibold text-on-surface capitalize">
-            {activeTab === 'pedidos' ? 'Gestión de Pedidos' : activeTab === 'cartillas' ? 'Catálogo' : 'Colegios'}
-          </span>
-        </div>
+    <header className="fixed top-0 right-0 left-0 lg:left-72 z-30 h-20 px-4 sm:px-6 lg:px-8 bg-surface/80 backdrop-blur-md border-b border-surface-container-high/50 flex items-center justify-between gap-4 no-print">
+      <div className="flex items-center gap-4 min-w-0 flex-1">
+        <h1 className="hidden xl:block text-sm font-bold text-primary whitespace-nowrap pl-10 lg:pl-0">
+          {meta.title}
+        </h1>
 
-        <div className="inline-flex items-center gap-1.5 bg-secondary-container px-3 py-1 rounded-full shrink-0">
-          <span className="w-2 h-2 rounded-full bg-secondary animate-pulse" />
-          <span className="text-xs font-bold text-on-secondary-container tracking-tight">
-            Ciclo Lectivo 2025
-          </span>
-        </div>
-
-        <div className="relative max-w-xs w-full hidden md:block">
-          <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline text-[18px]">
-            search
-          </span>
+        <label className="relative flex items-center flex-1 max-w-md min-w-0 pl-10 lg:pl-0">
+          <span className="sr-only">{meta.searchPlaceholder}</span>
+          <Icon
+            name="search"
+            size={18}
+            className="absolute left-13 lg:left-3 text-outline pointer-events-none"
+          />
           <input
-            className="w-full pl-9 pr-3 py-1.5 bg-surface-container-lowest border border-outline-variant/40 rounded-lg text-xs text-on-surface placeholder:text-outline focus:outline-none focus:ring-2 focus:ring-primary-container"
-            placeholder="Buscar por alumno, DNI o pedido..."
-            type="text"
             value={searchQuery}
-            onChange={(e) => onSearchChange(e.target.value)}
+            onChange={(event) => onSearchChange(event.target.value)}
+            placeholder={meta.searchPlaceholder}
+            className="w-full h-10 pl-10 pr-9 rounded-lg bg-surface-container-lowest border border-surface-container-high text-xs text-on-surface placeholder:text-outline focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
+            type="search"
           />
           {searchQuery && (
             <button
               onClick={() => onSearchChange('')}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-outline hover:text-on-surface text-[14px]"
+              className="absolute right-2 w-6 h-6 rounded-full flex items-center justify-center text-outline hover:bg-surface-container focus-visible:outline-2 focus-visible:outline-primary"
+              type="button"
+              aria-label="Limpiar búsqueda"
             >
-              ✕
+              <Icon name="close" size={16} />
             </button>
           )}
-        </div>
+        </label>
       </div>
 
-      <div className="flex items-center gap-3 sm:gap-4 shrink-0">
-        <button
-          onClick={onOpenNotifications}
-          className="relative p-2 rounded-full text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors cursor-pointer"
-          title="Notificaciones de remesas y pagos"
-          type="button"
-        >
-          <span className="material-symbols-outlined text-[24px]">notifications</span>
-          <span className="absolute top-1 right-1 w-2.5 h-2.5 rounded-full bg-tertiary-container ring-2 ring-surface" />
-        </button>
+      <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+        <div className="relative">
+          <button
+            onClick={() => setShowNotifications((open) => !open)}
+            className="relative w-10 h-10 rounded-lg bg-surface-container-lowest border border-surface-container-high flex items-center justify-center text-on-surface-variant hover:text-primary hover:bg-surface-container transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+            type="button"
+            aria-label={`Notificaciones${unread ? `, ${unread} sin leer` : ''}`}
+            aria-expanded={showNotifications}
+          >
+            <Icon name="notifications" size={20} />
+            {unread > 0 && (
+              <span className="absolute -top-1 -right-1 min-w-4.5 h-4.5 px-1 rounded-full bg-error text-on-error text-[10px] font-bold flex items-center justify-center">
+                {unread > 9 ? '9+' : unread}
+              </span>
+            )}
+          </button>
 
-        <div className="flex items-center gap-3 pl-2 border-l border-surface-container-high">
-          <div className="flex flex-col text-right hidden sm:flex">
-            <span className="text-xs font-bold text-on-surface leading-tight">
-              {TEACHER_PROFILE.name}
+          {showNotifications && (
+            <NotificationsPanel
+              notifications={notifications}
+              onClose={() => setShowNotifications(false)}
+              onOpenOrder={onOpenOrder}
+            />
+          )}
+        </div>
+
+        <div className="flex items-center gap-2.5 pl-2 sm:pl-3 border-l border-surface-container-high">
+          <div className="hidden sm:flex flex-col items-end leading-tight">
+            <span className="text-xs font-bold text-on-surface whitespace-nowrap">
+              {teacher?.name ?? 'Docente'}
             </span>
-            <span className="text-[11px] text-outline leading-tight">
-              {TEACHER_PROFILE.role}
+            <span className="text-[10px] text-outline whitespace-nowrap">
+              {teacher?.role ?? 'Sesión activa'}
             </span>
           </div>
-          <div className="relative">
-            <img
-              alt="Prof. Martín Gómez"
-              referrerPolicy="no-referrer"
-              className="w-9 h-9 rounded-full object-cover ring-2 ring-primary/20 shadow-xs"
-              src={TEACHER_PROFILE.avatar}
-              onError={(e) => {
-                // Fallback to stylized initial if external image fails
-                (e.target as HTMLElement).style.display = 'none';
-                const parent = (e.target as HTMLElement).parentElement;
-                if (parent && !parent.querySelector('.fallback-avatar')) {
-                  const fallback = document.createElement('div');
-                  fallback.className = 'w-9 h-9 rounded-full bg-primary text-white flex items-center justify-center font-bold text-xs fallback-avatar';
-                  fallback.innerText = 'MG';
-                  parent.appendChild(fallback);
-                }
-              }}
-            />
-            <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-secondary ring-2 ring-surface" />
+          <div
+            className="w-9 h-9 rounded-full bg-primary-container text-on-primary flex items-center justify-center text-[11px] font-extrabold shrink-0"
+            title={teacher?.email}
+          >
+            {initials(teacher?.name ?? 'GC')}
           </div>
         </div>
       </div>
