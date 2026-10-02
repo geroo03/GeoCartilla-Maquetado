@@ -8,6 +8,8 @@ Tiene dos vistas sobre los mismos datos: el **panel docente** (escritorio) y el
 **portal del alumno** (móvil). Lo que pasa en una se ve en la otra: si un alumno
 pide una cartilla, al docente le baja el stock y le entra el pedido.
 
+**Demo en vivo:** https://geroo03.github.io/GeoCartilla-Maquetado/
+
 ## Correrla
 
 ```bash
@@ -22,7 +24,7 @@ la propia pantalla de acceso.
 |---|---|
 | `npm run dev` | Servidor de desarrollo |
 | `npm run build` | Build de producción |
-| `npm run preview` | Sirve el build |
+| `npm run preview` | Sirve el build en el mismo subpath que GitHub Pages |
 | `npm run lint` | Chequeo de tipos (`tsc --noEmit`) |
 | `npm test` | Tests del reducer y las métricas |
 
@@ -105,3 +107,13 @@ invariantes del reducer (el stock baja al pedir y vuelve al cancelar, editar no
 duplica, el historial queda ordenado, el undo restaura) y el cuadre de las métricas
 (el embudo suma el total, la suma por colegio reconstruye el total, y un alumno nunca
 ve pedidos ni notificaciones de otro).
+
+## Despliegue
+
+Cada push a `main` dispara [el workflow](.github/workflows/deploy.yml), que corre el
+chequeo de tipos y los tests antes de publicar en GitHub Pages. Si alguno falla, no
+se publica.
+
+Como Pages sirve el sitio bajo `/GeoCartilla-Maquetado/`, el build usa ese `base`.
+`npm run preview` lo respeta para que puedas probar en local exactamente lo que queda
+publicado.
