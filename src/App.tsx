@@ -185,7 +185,12 @@ function AppShell() {
               onSwitchToStudent={() => setAppMode('student')}
             />
 
-            <div className="flex-1 lg:pl-72 flex flex-col min-h-screen">
+            {/*
+              min-w-0 es necesario: sin eso el contenedor es un item flex con
+              min-width auto y no puede encogerse por debajo del ancho de su
+              contenido, lo que generaba scroll horizontal en pantallas chicas.
+            */}
+            <div className="flex-1 min-w-0 lg:pl-72 flex flex-col min-h-screen">
               <HeaderTeacher
                 searchQuery={searchQuery}
                 onSearchChange={setSearchQuery}
@@ -201,7 +206,7 @@ function AppShell() {
                 }}
               />
 
-              <main className="relative pt-24 px-4 sm:px-6 lg:px-8 pb-24 bg-background flex-1 w-full">
+              <main className="relative pt-24 px-4 sm:px-6 lg:px-8 pb-24 bg-background flex-1 w-full min-w-0 overflow-x-hidden">
                 {teacherTab === 'resumen' && <DashboardView />}
                 {teacherTab === 'pedidos' && <OrdersView searchQuery={searchQuery} />}
                 {teacherTab === 'cartillas' && <BookletsView searchQuery={searchQuery} />}

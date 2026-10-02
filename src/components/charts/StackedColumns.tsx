@@ -26,7 +26,7 @@ export const StackedColumns: React.FC<StackedColumnsProps> = ({
   height = 200,
   valueSuffix = '',
 }) => {
-  const [containerRef, width] = useElementWidth<HTMLDivElement>();
+  const [containerRef, width] = useElementWidth<HTMLDivElement>(320);
   const [hovered, setHovered] = useState<number | null>(null);
 
   const padding = { top: 16, right: 8, bottom: 26, left: 30 };
@@ -46,7 +46,7 @@ export const StackedColumns: React.FC<StackedColumnsProps> = ({
 
   return (
     <div ref={containerRef} className="relative w-full">
-      <svg width={width} height={height} role="img" aria-label="Pedidos por semana">
+      <svg width={width} height={height} className="max-w-full" role="img" aria-label="Pedidos por semana">
         {/* Grilla recesiva, hairline y sólida */}
         {ticks.map((tick) => {
           const y = padding.top + plotHeight - scaleY(tick);

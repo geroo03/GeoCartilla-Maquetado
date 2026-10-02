@@ -30,7 +30,7 @@ export const HorizontalBars: React.FC<HorizontalBarsProps> = ({
   barHeight = 18,
   emptyMessage = 'Sin datos todavía.',
 }) => {
-  const [containerRef, width] = useElementWidth<HTMLDivElement>();
+  const [containerRef, width] = useElementWidth<HTMLDivElement>(320);
   const [hovered, setHovered] = useState<number | null>(null);
 
   if (data.length === 0) {
@@ -45,7 +45,7 @@ export const HorizontalBars: React.FC<HorizontalBarsProps> = ({
 
   return (
     <div ref={containerRef} className="relative w-full">
-      <svg width={width} height={height} role="img" aria-label="Comparación por categoría">
+      <svg width={width} height={height} className="max-w-full" role="img" aria-label="Comparación por categoría">
         {data.map((datum, index) => {
           const y = index * rowHeight;
           const barWidth = (datum.value / max) * plotWidth;

@@ -140,6 +140,18 @@ body {
     background: white !important;
   }
 
+  /*
+   * transition-all de Tailwind incluye visibility, asi que al imprimir las
+   * barras de progreso de las tarjetas KPI seguian visibles durante los 500ms
+   * de la transicion y se colaban en la hoja. Al imprimir no hay animaciones.
+   */
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+
   body * {
     visibility: hidden;
     box-shadow: none !important;

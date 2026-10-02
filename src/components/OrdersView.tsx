@@ -94,6 +94,7 @@ export const OrdersView: React.FC<{ searchQuery: string }> = ({ searchQuery }) =
         order.cartillaTitle.toLowerCase().includes(needle) ||
         order.studentEmail.toLowerCase().includes(needle) ||
         order.division.toLowerCase().includes(needle) ||
+        order.school.toLowerCase().includes(needle) ||
         (digits.length >= 3 && order.studentDni.replace(/\D/g, '').includes(digits));
 
       return (

@@ -14,7 +14,7 @@ const TAB_META: Record<TeacherTab, { title: string; searchPlaceholder: string }>
   },
   pedidos: {
     title: 'Pedidos',
-    searchPlaceholder: 'Buscar por alumno, DNI, código o cartilla...',
+    searchPlaceholder: 'Buscar por alumno, DNI, código, cartilla o colegio...',
   },
   entregas: {
     title: 'Entregas',
